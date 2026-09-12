@@ -22,7 +22,8 @@ docs.sh - keep docs/ in the house voice.
   docs.sh toc <file>         the table of contents the headings imply
   docs.sh rules              what each rule code means
 
-Files default to every page in docs/, and may be paths or bare names (routing).
+Files default to every page under docs/, subfolders included, and may be paths
+or bare names (routing).
 Set DOCS_DIR to point at another project. Exit status is 1 when lint finds
 anything other than advisories, so it works as a hook or a pre-commit step.
 USAGE
@@ -42,9 +43,9 @@ PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/project"
 files=()
 if [ "$cmd" != "rules" ]; then
   if [ "$#" -eq 0 ]; then
-    shopt -s nullglob
-    files=("$DOCS"/*.md)
-    shopt -u nullglob
+    # every page, subfolders included - a page nested under docs/ is still a page
+    while IFS= read -r -d '' page; do files+=("$page"); done \
+      < <(find "$DOCS" -type f -name '*.md' -print0 2>/dev/null | sort -z)
     [ "${#files[@]}" -gt 0 ] || { echo "docs.sh: no pages in $DOCS" >&2; exit 2; }
   else
     for a in "$@"; do
@@ -134,12 +135,15 @@ def parse(text):
     return out
 
 def heading_ids(heads):
-    """The id each heading gets, in order. A repeated heading is numbered -1, -2 across the whole page, as GitHub numbers it."""
-    seen, ids = {}, []
+    """The id each heading gets, in order and never one already taken. A repeat is numbered -1, -2, stepping past any number a heading already holds, as GitHub does."""
+    counts, ids = {}, []
     for _, _, t in heads:
-        s = slug(t)
-        ids.append(f"{s}-{seen[s]}" if s in seen else s)
-        seen[s] = seen.get(s, 0) + 1
+        base = candidate = slug(t)
+        while candidate in counts:
+            counts[base] += 1
+            candidate = f"{base}-{counts[base]}"
+        counts[candidate] = 0
+        ids.append(candidate)
     return ids
 
 def anchors(text):

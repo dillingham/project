@@ -90,3 +90,41 @@ out=$(cd "$TEMP" && bash "$SCRIPT" lint repeated.md 2>&1) || fail 'a valid page 
 toc=$(cd "$TEMP" && bash "$SCRIPT" toc repeated.md)
 [ "$toc" = "$(sed -n '3,7p' "$TEMP/docs/repeated.md")" ] || { out="$toc"; fail 'toc did not reproduce the contents the page carries'; }
 echo 'PASS: a valid page with repeated headings lints clean, and toc generates its contents exactly' 
+
+# A heading already holding the next number pushes the repeat one further on,
+# so no two headings ever share an id.
+cat > "$TEMP/docs/numbered.md" <<'DOC'
+# Numbered
+
+- [Introduction](#introduction)
+- [Usage](#usage)
+- [Usage-1](#usage-1)
+- [Usage](#usage-2)
+
+## Introduction
+
+See [the third](#usage-2).
+
+## Usage
+
+The first.
+
+## Usage-1
+
+A heading that already holds the next number.
+
+## Usage
+
+The third.
+DOC
+out=$(cd "$TEMP" && bash "$SCRIPT" lint numbered.md 2>&1) || fail 'a page whose headings hold numbered ids failed lint'
+[ -z "$out" ] || fail 'a page whose headings hold numbered ids reported findings'
+toc=$(cd "$TEMP" && bash "$SCRIPT" toc numbered.md)
+[ "$toc" = "$(sed -n '3,6p' "$TEMP/docs/numbered.md")" ] || { out="$toc"; fail 'toc handed out an id twice'; }
+echo 'PASS: a heading id is never handed out twice'
+
+mkdir -p "$TEMP/docs/internals"
+printf '# Deep\n\n## Introduction\n\nSee [gone](missing.md).\n' > "$TEMP/docs/internals/deep.md"
+out=$(cd "$TEMP" && bash "$SCRIPT" lint 2>&1 || true)
+expect 'docs/internals/deep.md:5: D040  link to a file that does not exist: missing.md'
+echo 'PASS: linting every page reaches pages in subfolders'

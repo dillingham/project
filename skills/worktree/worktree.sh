@@ -44,7 +44,8 @@ folder=${folder%-}
 # between our push and our pop. Apply by the sha the push handed us
 # (content-addressed, survives being buried) and drop only the matching
 # entry - never a blind pop, which would risk taking someone else's stash.
-unstash() { git -C "$1" stash apply "$2" \
+# --index, so a file staged one way and edited another comes back both ways.
+unstash() { git -C "$1" stash apply --index "$2" \
   && git -C "$1" stash drop "$(git -C "$1" stash list --format='%H %gd' | awk -v s="$2" '$1==s{print $2; exit}')"; }
 
 # Until the worktree exists, ANY exit - an abort below, or a command failing
@@ -64,8 +65,13 @@ dest="$WORKTREES/$folder"
 dirty=$(git -C "$mainpath" status --porcelain)
 if [ -n "$dirty" ]; then
   if [ -n "$take" ]; then
-    git -C "$mainpath" stash push -u -m "relocating to $n" >&2 || abort "stash failed, aborting"
-    stashed=$(git -C "$mainpath" rev-parse refs/stash)
+    # Found again by a message nobody else can have written, never as the top
+    # of the stack: another worktree can push its own stash between ours and
+    # the lookup, and taking the top would move their changes, not these.
+    tag="relocating to $n ($$-$(date +%s))"
+    git -C "$mainpath" stash push -u -m "$tag" >&2 || abort "stash failed, aborting"
+    stashed=$(git -C "$mainpath" stash list --format='%H %gs' | awk -v t="$tag" 'index($0, t) { print $1; exit }')
+    [ -n "$stashed" ] || abort "stashed, but cannot find it again - it is in git stash list as '$tag'"
   else
     echo "$base is not clean, aborting:" >&2
     echo "$dirty" >&2

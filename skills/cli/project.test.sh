@@ -215,4 +215,12 @@ contains "$TEMP/output" 'no heading on spec-dup.md for #usage-2'
 [ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: check rejected a valid duplicate-heading anchor' >&2; cat "$TEMP/output" >&2; exit 1; }
 ok 'a repeated heading is reachable at its numbered anchor'
 
+fixture
+printf '# Page\n\n## Usage\n\n## Usage-1\n\n## Usage\n' > "$FIXTURE/project/spec-dup.md"
+printf '# A ticket\n\nPriority: low\n\n## Todo\n\n[a](spec-dup.md#usage) [b](spec-dup.md#usage-1) [c](spec-dup.md#usage-2) [d](spec-dup.md#usage-3)\n' > "$FIXTURE/project/todo-example.md"
+if run check; then echo 'FAIL: check passed a link to a heading that is not there' >&2; exit 1; fi
+contains "$TEMP/output" 'no heading on spec-dup.md for #usage-3'
+[ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: a heading id was handed out twice' >&2; cat "$TEMP/output" >&2; exit 1; }
+ok 'a numbered heading id is never handed out twice'
+
 printf '%s scenarios passed.\n' "$passed"

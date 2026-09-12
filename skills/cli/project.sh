@@ -409,13 +409,15 @@ def prose(text):
             yield n, re.sub(r"`[^`]*`", "", line)
 
 def anchors(text):
-    """GitHub's heading slugs, approximated the way the Pest check did. A repeated heading gets -1, -2, as GitHub numbers it."""
-    seen, ids = {}, set()
+    """GitHub's heading slugs, approximated the way the Pest check did. A repeat is numbered -1, -2, stepping past any number a heading already holds, as GitHub does."""
+    counts = {}
     for h in re.findall(r"^#{1,6} (.+)$", text, re.M):
-        slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", h).lower())).strip("-")
-        ids.add(f"{slug}-{seen[slug]}" if slug in seen else slug)
-        seen[slug] = seen.get(slug, 0) + 1
-    return ids
+        base = candidate = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", h).lower())).strip("-")
+        while candidate in counts:
+            counts[base] += 1
+            candidate = f"{base}-{counts[base]}"
+        counts[candidate] = 0
+    return set(counts)
 
 def resolve(src, page):
     base = src.parent / page
