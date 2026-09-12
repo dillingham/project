@@ -80,7 +80,7 @@ Worktrees live in `~/Worktrees` by default. Allow that folder once using its abs
 `ci.sh` checks the board and documentation for broken references and other consistency or style problems. Pin a released tag in CI:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.3.0/ci.sh | bash -s v0.3.0
+curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.4.0/ci.sh | bash -s v0.4.0
 ```
 
 | Variable | Default | Purpose |
