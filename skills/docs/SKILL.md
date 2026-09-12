@@ -1,6 +1,6 @@
 ---
 name: docs
-description: "Use when writing, revising or reviewing user-facing documentation - the pages in docs/ that teach someone how to use this project. Invoked as `/project:docs <spec>` to write or revise the page a spec describes, `/project:docs <page>` to revise an existing page, or `/project:docs` alone to lint every page and report drift. Runs a five-step procedure: locate the target and its siblings, verify every claim against the code, draft, lint with the bundled docs.sh, and report contradictions rather than silently fixing them. Also covers the page skeleton, what goes first, the paragraph-then-code rhythm, voice, and when a note or warning earns its place. Not for design specs, agent rules, or code comments."
+description: "Use when writing, revising or reviewing user-facing documentation - the pages in docs/ that teach someone how to use this project. Invoked as `/project:docs <spec>` to write or revise the page a spec describes, `/project:docs <page>` to review one page and report what is wrong with it - revising it only when explicitly asked -, or `/project:docs` alone to lint every page and report drift. Runs a five-step procedure: locate the target and its siblings, verify every claim against the code, draft, lint with the bundled docs.sh, and report contradictions rather than silently fixing them. Also covers the page skeleton, what goes first, the paragraph-then-code rhythm, voice, and when a note or warning earns its place. Not for design specs, agent rules, or code comments."
 ---
 
 # Writing docs
@@ -13,7 +13,7 @@ Docs are for someone building something with this project. They arrive with a ta
 
 ```
 /project:docs spec-<feature>.md  write or revise the page that spec describes
-/project:docs <page>             revise an existing page
+/project:docs <page>             review one page; revise it only when asked to
 /project:docs                    lint every page and report drift
 ```
 
@@ -45,7 +45,7 @@ Where a project writes its test names as claims rather than `test_it_works`, rea
 
 **Absence is evidence too.** A behaviour no test asserts is unbuilt or untested, and that is usually the exact sentence you were about to get wrong. Verify in the source whatever the tests do not reach, and name in your report which sections rest on behaviour nothing tests - those are the ones a reader should trust least.
 
-The two invocations part company here, and only here. `/project:docs` alone, or `/project:docs <page>`, is a **review**: you report and change nothing. `/project:docs <spec>` **produces a page**, so a false claim has to be dealt with rather than merely noted. In both cases you report, and in neither do you decide which side was wrong.
+The two invocations part company here, and only here. `/project:docs` alone, or `/project:docs <page>`, is a **review**: you report and change nothing. `/project:docs <spec>`, or an explicit request to revise a page, **produces a page**, so a false claim has to be dealt with rather than merely noted. In both cases you report, and in neither do you decide which side was wrong.
 
 **Report contradictions, never correct them.** When a page claims something the code does not do, leave that page exactly as written and say so in your reply: the file and line, what it claims, what the code actually does, and where you looked. The page may be aspirational, or the code may be the bug. Deciding which is not yours to do, and a silent correction hides the choice from the person who has to make it.
 

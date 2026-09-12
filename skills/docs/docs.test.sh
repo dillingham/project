@@ -52,4 +52,41 @@ printf '# Dup\n\n## Introduction\n\n## Usage\n\n## Usage\n\nSee [one](#usage), [
 out=$(cd "$TEMP" && bash "$SCRIPT" lint dup.md || true)
 expect 'docs/dup.md:9: D041  no heading on dup.md for #usage-2'
 refuse '#usage-1'
-echo 'PASS: a repeated heading is reachable at its numbered anchor, and only that far' 
+echo 'PASS: a repeated heading is reachable at its numbered anchor, and only that far'
+
+# The whole page, not one message: a valid page with repeated headings has to
+# lint clean, and the contents it implies have to be the ones it carries.
+cat > "$TEMP/docs/repeated.md" <<'DOC'
+# Repeated
+
+- [Introduction](#introduction)
+- [Usage](#usage)
+    - [Options](#options)
+- [Usage](#usage-1)
+    - [Options](#options-1)
+
+## Introduction
+
+See [the first usage](#usage) and [the second](#usage-1).
+
+## Usage
+
+The first.
+
+### Options
+
+The first options.
+
+## Usage
+
+The second.
+
+### Options
+
+The second options.
+DOC
+out=$(cd "$TEMP" && bash "$SCRIPT" lint repeated.md 2>&1) || fail 'a valid page with repeated headings failed lint'
+[ -z "$out" ] || fail 'a valid page with repeated headings reported findings'
+toc=$(cd "$TEMP" && bash "$SCRIPT" toc repeated.md)
+[ "$toc" = "$(sed -n '3,7p' "$TEMP/docs/repeated.md")" ] || { out="$toc"; fail 'toc did not reproduce the contents the page carries'; }
+echo 'PASS: a valid page with repeated headings lints clean, and toc generates its contents exactly' 

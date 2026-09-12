@@ -133,14 +133,18 @@ def parse(text):
         out.append((n, k, raw))
     return out
 
-def anchors(text):
-    """Every id a page's headings get. A repeated heading is numbered -1, -2, as GitHub numbers it."""
-    seen, ids = {}, set()
-    for _, _, t in headings(parse(text)):
+def heading_ids(heads):
+    """The id each heading gets, in order. A repeated heading is numbered -1, -2 across the whole page, as GitHub numbers it."""
+    seen, ids = {}, []
+    for _, _, t in heads:
         s = slug(t)
-        ids.add(f"{s}-{seen[s]}" if s in seen else s)
+        ids.append(f"{s}-{seen[s]}" if s in seen else s)
         seen[s] = seen.get(s, 0) + 1
     return ids
+
+def anchors(text):
+    """Every id a page offers a link."""
+    return set(heading_ids(headings(parse(text))))
 
 def headings(lines):
     return [(n, len(m.group(1)), m.group(2).strip())
@@ -166,22 +170,23 @@ def lint(path):
     toc = [(n, m.group(1), m.group(2)) for n, k, raw in lines if k == "list"
            for m in [re.match(r"^\s*[-*+]\s*\[(.+?)\]\(#(.+?)\)\s*$", raw)] if m
            and (not h2 or n < h2[0][0])]
-    nav = [(n, lvl, t) for n, lvl, t in heads if lvl in (2, 3)]
+    ids = heading_ids(heads)
+    nav = [(n, lvl, t, i) for (n, lvl, t), i in zip(heads, ids) if lvl in (2, 3)]
     if not toc:
         if len(nav) > 1:
             hit(1, "D002", "no table of contents above the first section")
     else:
-        want = [slug(t) for _, _, t in nav]
+        want = [i for _, _, _, i in nav]
         have = [a for _, _, a in toc]
         for a in have:
             if a not in want:
                 n = next(n for n, _, x in toc if x == a)
                 hit(n, "D002", f'contents link "#{a}" matches no ## or ### heading')
-        for n, lvl, t in nav:
-            if slug(t) not in have:
+        for n, lvl, t, i in nav:
+            if i not in have:
                 hit(n, "D002", f'"{t}" is missing from the contents')
-        for n, lvl, t in heads:
-            if lvl >= 4 and slug(t) in have:
+        for (n, lvl, t), i in zip(heads, ids):
+            if lvl >= 4 and i in have:
                 hit(n, "D003", f'"{t}" is a #### and does not belong in the contents')
         if [a for a in have if a in want] != [w for w in want if w in have]:
             hit(toc[0][0], "D002", "contents are in a different order than the headings")
@@ -375,9 +380,10 @@ def stats(paths):
         print(f"{name:{w}}  {got:>14}   {want}")
 
 if cmd == "toc":
-    for n, lvl, t in headings(parse(Path(paths[0]).read_text())):
-        if lvl == 2: print(f"- [{t}](#{slug(t)})")
-        elif lvl == 3: print(f"    - [{t}](#{slug(t)})")
+    heads = headings(parse(Path(paths[0]).read_text()))
+    for (n, lvl, t), i in zip(heads, heading_ids(heads)):
+        if lvl == 2: print(f"- [{t}](#{i})")
+        elif lvl == 3: print(f"    - [{t}](#{i})")
     sys.exit(0)
 
 if cmd in ("lint", "all"):
