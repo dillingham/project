@@ -6,7 +6,7 @@
 # Locally, from a checkout of the plugin:
 #   bash path/to/project/ci.sh
 # In CI, pinned to a tag so a plugin release never turns a build red by itself:
-#   curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.2.1/ci.sh | bash -s v0.2.1
+#   curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.3.0/ci.sh | bash -s v0.3.0
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2>/dev/null && pwd)"

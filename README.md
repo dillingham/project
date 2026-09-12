@@ -166,7 +166,7 @@ A ticket is claimed by the worktree `/project:worktree` opens for it - its branc
 `ci.sh` runs every check the plugin ships against the repo it is run in: `project.sh check` on `project/` (broken links, missing anchors, bare ticket names, code citing a spec that is gone) and `docs.sh lint` on `docs/` (house style, broken links and anchors, links into `project/`, example width). Pin it to a tag, so a new release never turns a build red by itself:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.2.1/ci.sh | bash -s v0.2.1
+curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.3.0/ci.sh | bash -s v0.3.0
 ```
 
 ## Settings
