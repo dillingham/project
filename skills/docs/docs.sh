@@ -36,6 +36,9 @@ case "$cmd" in
   *) cmd=lint ;;
 esac
 
+# docs/ must never send a reader into project/, so the linter needs to know where it is
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/project"
+
 files=()
 if [ "$cmd" != "rules" ]; then
   if [ "$#" -eq 0 ]; then
@@ -54,8 +57,8 @@ if [ "$cmd" != "rules" ]; then
   fi
 fi
 
-python3 - "$cmd" "${files[@]:-}" <<'PY'
-import re, sys, statistics
+PROJECT_DIR="$PROJECT_DIR" python3 - "$cmd" "${files[@]:-}" <<'PY'
+import os, re, sys, statistics
 from pathlib import Path
 
 cmd, paths = sys.argv[1], [p for p in sys.argv[2:] if p]
@@ -73,6 +76,7 @@ Rhythm
   D012  more than five paragraphs without a code block
   D013  code fence with no language
   D014  reference entry does not open "The `name` method ..."
+  D015  example line wider than DOCS_EXAMPLE_WIDTH (default 62)
   D026  a section carrying more bullets than paragraphs (advisory)
   D027  implementation detail where a capability belongs (advisory)
 
@@ -83,6 +87,11 @@ Voice
   D023  "we" or "let's" outside a walkthrough (advisory)
   D024  em-dash or en-dash
   D025  hard-wrapped paragraph
+
+Links
+  D040  link to a file that does not exist
+  D041  link to a heading that does not exist
+  D042  a link into project/, or a ticket named in prose
 
 Machinery that belongs to a docs website, not to a repository
   D030  <a name="..."> anchor
@@ -96,6 +105,9 @@ INTERNALS = r"\b(base class|under the hood|behind the scenes|internally|is not d
 WARMTH = r"\b(convenient(ly)?|expressive|powerful|beautiful|blazing|wonderful|enjoyable|effortless|seamless)\b"
 CONTRACTION = r"\b(don't|doesn't|didn't|can't|won't|isn't|aren't|wasn't|weren't|hasn't|haven't|couldn't|shouldn't|wouldn't|it's|that's|there's|you'll|you're|they're)\b"
 ADVISORY = {"D023", "D026", "D027"}
+WIDTH = int(os.environ.get("DOCS_EXAMPLE_WIDTH", "62"))
+PROJECT = os.path.realpath(os.environ.get("PROJECT_DIR", "project"))
+TICKET = r"(?<![\w/.-])((?:spec|done|todo|idea|spike|issue|reject)-[a-z0-9_-]+\.md)"
 
 def slug(h):
     h = h.replace("`", "").lower()
@@ -271,6 +283,35 @@ def lint(path):
         n2, k2, raw2 = lines[idx + 1]
         if k == "prose" and k2 == "prose":
             hit(n2, "D025", "hard-wrapped paragraph; one line per paragraph")
+
+    # --- links, and the line between docs/ and project/
+    # A *.review.md sidecar is a critique addressed to us: it quotes errors at
+    # whatever width they came, and cites the ticket that owns the gap, so the
+    # width and project/ rules do not apply to it. Its links still must resolve.
+    review = str(path).endswith(".review.md")
+    here = Path(path).resolve()
+    for n, k, raw in lines:
+        if k in ("code", "fence"):
+            if k == "code" and not review and len(raw.rstrip()) > WIDTH:
+                hit(n, "D015", f"example line is {len(raw.rstrip())} characters; break it to {WIDTH} or fewer")
+            continue
+        bare = re.sub(r"`[^`]*`", "", raw)
+        for target in re.findall(r"\]\(([^)]+)\)", bare):
+            if re.match(r"^[a-z][a-z0-9+.-]*:", target):
+                continue
+            page, _, frag = target.partition("#")
+            base = here.parent / page
+            dest = here if not page else next((c.resolve() for c in (base, Path(str(base) + ".md")) if c.exists()), None)
+            if dest is None:
+                hit(n, "D040", f"link to a file that does not exist: {target}")
+                continue
+            if not review and str(dest).startswith(PROJECT + os.sep):
+                hit(n, "D042", f"links into project/: {target}")
+            if frag and dest.suffix == ".md" and frag not in {slug(t) for _, _, t in headings(parse(dest.read_text()))}:
+                hit(n, "D041", f"no heading on {dest.name} for #{frag}")
+        if not review:
+            for ticket in sorted(set(re.findall(TICKET, bare))):
+                hit(n, "D042", f"names {ticket}; docs never send a reader into project/")
 
     return sorted(set(found))
 

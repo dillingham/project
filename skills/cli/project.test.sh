@@ -146,4 +146,37 @@ diff -r "$TEMP/rollback-before" "$FIXTURE/project"
 contains "$FIXTURE/reference.md" 'todo-example.md'
 ok 'write failure restores the original ticket and references'
 
+fixture
+cat > "$FIXTURE/project/todo-example.md" <<'DOC'
+# A ticket
+
+Spec: spec-real.md
+
+## Todo
+
+Fine: [real](spec-real.md), [heading](spec-real.md#the-heading), [here](#a-ticket), [site](https://example.com).
+Broken: [gone](spec-gone.md), [nope](spec-real.md#nope), and spec-real.md bare. `spec-real.md` in code is fine.
+DOC
+printf '# Real\n\n## The Heading\n' > "$FIXTURE/project/spec-real.md"
+mkdir -p "$FIXTURE/src" "$FIXTURE/tests"
+printf '// see project/spec-real.md and project/spec-missing.md\n' > "$FIXTURE/src/app.php"
+printf '// a fixture: project/planted.md\n' > "$FIXTURE/tests/fixture.php"
+git -C "$FIXTURE" add -A
+if run check; then echo 'FAIL: check passed a broken board' >&2; exit 1; fi
+contains "$TEMP/output" 'project/todo-example.md:8: P001  link to a file that does not exist: spec-gone.md'
+contains "$TEMP/output" 'project/todo-example.md:8: P002  no heading on spec-real.md for #nope'
+contains "$TEMP/output" 'project/todo-example.md:8: P003  bare spec-real.md in prose'
+contains "$TEMP/output" 'src/app.php:1: P004  cites project/spec-missing.md'
+[ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 4 ] || { echo 'FAIL: check reported something fine' >&2; cat "$TEMP/output" >&2; exit 1; }
+ok 'check reports broken links, missing anchors, bare ticket names and stale code citations, and nothing that is fine'
+
+fixture
+run check
+ok 'check passes a clean board'
+
+fixture
+rm "$FIXTURE/project/todo-example.md"
+if run check; then echo 'FAIL: check passed an empty board' >&2; exit 1; fi
+ok 'an empty board fails the check rather than passing unread'
+
 printf '%s scenarios passed.\n' "$passed"

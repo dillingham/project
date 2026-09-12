@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Plant the defects the link and width rules exist for, in a throwaway repo,
+# and check each is reported - and that what is fine stays silent. A rule that
+# reports a list is green both when nothing is wrong and when it is not running.
+set -euo pipefail
+
+SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docs.sh"
+TEMP=$(mktemp -d "${TMPDIR:-/tmp}/docs-test.XXXXXX")
+trap 'rm -rf "$TEMP"' EXIT
+mkdir -p "$TEMP/docs" "$TEMP/project"
+git -C "$TEMP" init -q
+
+at=$(printf 'a%.0s' $(seq 62)); over=$(printf 'b%.0s' $(seq 63))
+printf '# Spec\n' > "$TEMP/project/spec-thing.md"
+printf '# Other\n\n## Introduction\n\n## Usage\n' > "$TEMP/docs/other.md"
+cat > "$TEMP/docs/page.md" <<DOC
+# Page
+
+## Introduction
+
+Fine: [usage](other.md#usage), [same page](#introduction), [site](https://example.com).
+
+Broken: [gone](missing.md), [nope](other.md#nope), [spec](../project/spec-thing.md), and spec-thing.md by name.
+
+Two lines of example follow:
+
+\`\`\`php
+$at
+$over
+\`\`\`
+DOC
+cp "$TEMP/docs/page.md" "$TEMP/docs/page.review.md"
+
+out=$(cd "$TEMP" && bash "$SCRIPT" lint page.md page.review.md || true)
+fail() { echo "FAIL: $1"; echo "$out"; exit 1; }
+expect() { grep -Fq -- "$1" <<<"$out" || fail "missing: $1"; }
+refuse() { ! grep -Fq -- "$1" <<<"$out" || fail "unexpected: $1"; }
+
+expect 'docs/page.md:7: D040  link to a file that does not exist: missing.md'
+expect 'docs/page.md:7: D041  no heading on other.md for #nope'
+expect 'docs/page.md:7: D042  links into project/: ../project/spec-thing.md'
+expect 'docs/page.md:7: D042  names spec-thing.md'
+expect 'docs/page.md:13: D015  example line is 63 characters'
+refuse 'docs/page.md:12:'
+refuse 'docs/page.md:5:'
+expect 'docs/page.review.md:7: D040'
+refuse 'docs/page.review.md:7: D042'
+refuse 'docs/page.review.md:13: D015'
+echo 'PASS: links, anchors, the project/ boundary and example width, with review sidecars exempt from the last two'

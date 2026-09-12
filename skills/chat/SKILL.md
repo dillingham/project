@@ -32,6 +32,7 @@ Running it with no arguments prints its own menu followed by what to pick up, so
 | "what shipped", "what landed this week", "what changed" | `cat project/changelog.md` | Answer from the top of it. The links go to the ticket carrying the reasoning. |
 | "latest todo", "what was added last", "what's new" | `$P show todo` (or whichever status they named) | One command: it prints the id it picked, then that whole file. Answer from it - do not list first. |
 | "let's spike X", "spike out X", "design X" | `$P spec X` then `$P find X` | Do not answer in prose. Run the spike session below. |
+| "is the board healthy", "any broken links", before committing edits to `project/` | `$P check` | No output means clean. Otherwise each line is `file:line: CODE`; fix what you wrote, and report the rest rather than fixing it unasked. |
 
 Output is tab-separated, one record per line:
 

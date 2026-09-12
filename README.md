@@ -160,6 +160,14 @@ What is deliberately *not* automated is the priority itself. An agent assigning 
 
 A ticket is claimed by the worktree `/project:worktree` opens for it - its branch is named after the ticket, and `git worktree list` is shared by every checkout, so there is no header to write. A claimed ticket shows `CLAIMED` and drops out of `next` until the worktree is removed.
 
+## CI
+
+`ci.sh` runs every check the plugin ships against the repo it is run in: `project.sh check` on `project/` (broken links, missing anchors, bare ticket names, code citing a spec that is gone) and `docs.sh lint` on `docs/` (house style, broken links and anchors, links into `project/`, example width). Pin it to a tag, so a new release never turns a build red by itself:
+
+```
+curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.2.0/ci.sh | bash -s v0.2.0
+```
+
 ## Settings
 
 | Variable | Default | For |
@@ -167,6 +175,7 @@ A ticket is claimed by the worktree `/project:worktree` opens for it - its branc
 | `PROJECT_STALE_DAYS` | `30` | days idle before a ticket sorts up one priority |
 | `PROJECT_WORKTREES` | `~/Worktrees` | where `/project:worktree` puts worktrees |
 | `DOCS_DIR` | `docs/` | where `/project:docs` looks for pages |
+| `DOCS_EXAMPLE_WIDTH` | `62` | the widest line a `docs/` example may carry |
 
 ## Changing it
 

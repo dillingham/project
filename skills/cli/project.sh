@@ -43,6 +43,8 @@ project.sh - the board in project/. Every file is {status}-{name}.md.
   project.sh show <status>   print the newest file at that status
   project.sh log <id>        its commit trail: hash, date, subject (renames followed)
   project.sh changelog       what landed, newest first, linked to its ticket
+  project.sh check           broken links, anchors and bare ticket names in project/,
+                             and code citing a project/ or docs/ file that is gone
   project.sh new <status> <name>   scaffold with the header
   project.sh move <status> <filename> [--dry-run]   rename and update references
   project.sh mv <id> <status> [--dry-run]          compatibility alias
@@ -378,5 +380,79 @@ case "$cmd" in
     else move_ticket "$3" "$2" "${4:-}"; fi ;;
   idea|spike|todo|issue|done|reject|list|spec-only)
     rows | awk -F'\037' -v K="${cmd%-only}" '$3==K' | newest | emit ;;
+  check)
+    # Ported from the Pest suite that guarded the board through its renames:
+    # every rule reports a list, and an empty board is itself a failure, so a
+    # glob that stops matching cannot pass in silence.
+    python3 - "$ROOT" <<'PY2'
+import re, subprocess, sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+TICKET = r"(?<![\w/.-])((?:spec|done|todo|idea|spike|issue|reject)-[a-z0-9_-]+\.md)"
+HEADER = re.compile(r"^(Description|Priority|Spec|Blocked|Bucket): ")
+found = []
+
+def prose(text):
+    """Line numbers kept; fenced blocks and inline code dropped - an example is not a reference."""
+    fenced = False
+    for n, line in enumerate(text.split("\n"), 1):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if not fenced:
+            yield n, re.sub(r"`[^`]*`", "", line)
+
+def anchors(text):
+    """GitHub's heading slugs, approximated the way the Pest check did."""
+    return {re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", h).lower())).strip("-")
+            for h in re.findall(r"^#{1,6} (.+)$", text, re.M)}
+
+def resolve(src, page):
+    base = src.parent / page
+    return next((c.resolve() for c in (base, Path(str(base) + ".md")) if c.exists()), None)
+
+files = sorted((root / "project").glob("*.md"))
+if not files:
+    print("project/: no markdown files, so nothing was checked")
+    sys.exit(1)
+
+for f in files:
+    name = str(f.relative_to(root))
+    for n, line in prose(f.read_text()):
+        for target in re.findall(r"\]\(([^)]+)\)", line):
+            if re.match(r"^[a-z][a-z0-9+.-]*:", target):
+                continue
+            page, _, frag = target.partition("#")
+            dest = resolve(f, page) if page else f
+            if dest is None:
+                found.append(f"{name}:{n}: P001  link to a file that does not exist: {target}")
+            elif frag and dest.suffix == ".md" and frag not in anchors(dest.read_text()):
+                found.append(f"{name}:{n}: P002  no heading on {dest.name} for #{frag}")
+        if HEADER.match(line):
+            continue
+        for ticket in sorted(set(re.findall(TICKET, re.sub(r"\[[^\]]*\]\([^)]*\)", "", line)))):
+            if ticket != f.name:
+                found.append(f"{name}:{n}: P003  bare {ticket} in prose; write it as a link")
+
+# Code citing a spec or a page by path. Test folders are skipped: fixtures
+# plant paths that are meant not to exist.
+tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True, text=True).stdout
+for path in filter(None, tracked.split("\0")):
+    if path.endswith(".md") or re.search(r"(^|/)tests?/", path):
+        continue
+    try:
+        text = (root / path).read_text()
+    except (UnicodeDecodeError, OSError):
+        continue
+    for n, line in enumerate(text.split("\n"), 1):
+        for cite in sorted(set(re.findall(r"(?<![\w/.-])((?:project|docs)/[A-Za-z0-9_./-]+\.md)", line))):
+            if not (root / cite).exists():
+                found.append(f"{path}:{n}: P004  cites {cite}, which does not exist")
+
+print("\n".join(found)) if found else None
+sys.exit(1 if found else 0)
+PY2
+    ;;
   *) usage >&2; exit 1 ;;
 esac
