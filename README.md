@@ -18,6 +18,7 @@ Updates arrive with `/plugin marketplace update dillingham`.
 | `/project:worktree <id>` | starts work on a ticket in a fresh, fully set up git worktree |
 | `/project:docs [spec or page]` | writes, revises or lints the pages in `docs/` |
 | `/project:qa <feature>` | hunts a feature in a real browser for bugs the other suites cannot see |
+| `/project:contribute <change>` | changes this plugin itself - a rule, a skill, a script - in a checkout, tested, committed for review |
 
 Claude also reaches for each one on its own when the conversation calls for it - filing an aside you drop mid-task, or starting a worktree when you say "let's start on X".
 
