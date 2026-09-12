@@ -27,14 +27,15 @@ usage() {
 project.sh - the board in project/. Every file is {status}-{name}.md.
 
   project.sh                 this menu, then what to pick up
-  project.sh next            critical + high, open only, plus one to triage
+  project.sh next            critical + high, else the best available, plus one to triage
   project.sh open            every open ticket, priority order
   project.sh all             everything, including done and reject
   project.sh groom           untriaged: unjudged, unblocked, not a bucket
   project.sh blocked         waiting on another ticket, and on what
   project.sh list            holding pens: grouped one-liners, promote items out
   project.sh unblocked       blocked on something that already shipped
-  project.sh claimed         tickets with a live worktree of their own name
+  project.sh claimed         live worktrees, by the branch that claims its tickets
+  project.sh resume [id]     where a claimed ticket stands: worktree, commits, newest checkpoint
   project.sh board           counts by status and by priority
   project.sh <status>        one status: idea spike todo issue done reject spec
   project.sh spec <name>     everything filed against spec-<name>.md
@@ -44,7 +45,8 @@ project.sh - the board in project/. Every file is {status}-{name}.md.
   project.sh log <id>        its commit trail: hash, date, subject (renames followed)
   project.sh changelog       what landed, newest first, linked to its ticket
   project.sh check           broken links, anchors and bare ticket names in project/,
-                             and code citing a project/ or docs/ file that is gone
+                             a ticket's current section left empty, and code citing
+                             a project/ or docs/ file that is gone
   project.sh new <status> <name>   scaffold with the header
   project.sh move <status> <filename> [--dry-run]   rename and update references
   project.sh mv <id> <status> [--dry-run]          compatibility alias
@@ -93,6 +95,13 @@ rows() {
       return sprintf("%04d-%02d-%02d %02d:%02d", y, m, d, int(secs/3600), int((secs%3600)/60))
     }
     function rank(p) { return p=="critical"?0 : p=="high"?1 : p=="medium"?2 : p=="low"?3 : p=="groom"?4 : 5 }
+    # the name after the status word, which a status change leaves alone;
+    # empty for anything that does not lead with a status
+    function slug(id,   s) {
+      s = id; sub(/-.*/, "", s)
+      if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
+      sub(/^[^-]*-/, "", id); return id
+    }
     BEGIN {
       OFS="\037"
       # every ticket that exists, and the reverse index of Blocked: lines
@@ -107,12 +116,14 @@ rows() {
       # a ticket with a live worktree of its own name is claimed - no header
       # to write or commit, git worktree list is already shared and instant.
       # related tickets sharing one branch join their ids with +, so a
-      # branch claims every id it names, not just the whole string
+      # branch claims every id it names, not just the whole string. The
+      # match is on the name after the status, so a spike that becomes a
+      # todo mid-work stays claimed by the branch opened for the spike
       while ((getline wl < branchf) > 0) {
         b = wl; sub(/^branch refs\/heads\//, "", b)
         if (b != main) {
           wn = split(b, wp, "+")
-          for (wi = 1; wi <= wn; wi++) { claimed[wp[wi]] = 1 }
+          for (wi = 1; wi <= wn; wi++) { s = slug(wp[wi]); if (s != "") claimed[s] = 1 }
         }
       }
 
@@ -131,6 +142,7 @@ rows() {
       # the status is the first word, so a file that does not start with one is
       # not board work - a map like index.md is not a ticket
       if (index(" " statuses " ", " " st " ") == 0) next
+      claim = (slug(base) in claimed)
 
       pri=""; spec=""; title=""; desc=""; blocked=""
       while ((getline l < path) > 0) {
@@ -160,13 +172,13 @@ rows() {
       # a claimed ticket also skips the bump: idle here just means the file
       # itself is untouched, which is normal while the real work happens on
       # the worktree branch instead
-      if (st!="done" && st!="reject" && st!="spec" && pri!="groom" && blocked=="" && !(base in claimed) && idle>=stale && r>0) { r=r-1; bump=" STALE" }
+      if (st!="done" && st!="reject" && st!="spec" && pri!="groom" && blocked=="" && !claim && idle>=stale && r>0) { r=r-1; bump=" STALE" }
       # a blocked or already-claimed ticket cannot be started, so neither
       # competes for attention
       if (blocked!="") r = 8
-      if (base in claimed) r = 8
+      if (claim) r = 8
       flag = ""
-      if (base in claimed) { flag = " CLAIMED" }
+      if (claim) { flag = " CLAIMED" }
       if (blocked != "") {
         on = blocked; sub(/ .*/, "", on); sub(/\.md$/, "", on)
         # a block whose blocker already shipped is stale, and nobody notices
@@ -186,12 +198,59 @@ emit() { awk -F'\037' -v OFS='\t' '{ print $2, $3, $4, $7, $8, $5, $6 }'; }
 newest() { sort -t"$SEP" -k7,7r; }
 open_only() { awk -F'\037' '$3!="done" && $3!="reject" && $3!="spec" && $3!="list"'; }
 
+# The live worktree claiming a ticket, as branch<TAB>path, matched the way
+# rows() matches: on the name after the status word, across + joins. awk reads
+# to the end rather than exiting, which under pipefail would SIGPIPE git.
+claimer() {
+  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v statuses="$STATUSES" '
+    function slug(id,   s) {
+      s = id; sub(/-.*/, "", s)
+      if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
+      sub(/^[^-]*-/, "", id); return id
+    }
+    BEGIN { w = slug(want) }
+    /^worktree / { p = substr($0, 10) }
+    /^branch refs\/heads\// && !found {
+      b = substr($0, 19); if (b == main) next
+      hit = (b == want)
+      n = split(b, part, "+")
+      for (i = 1; i <= n; i++) if (w != "" && slug(part[i]) == w) hit = 1
+      if (hit) { print b "\t" p; found = 1 }
+    }'
+}
+
+# What to pick up. Critical and high lead; with none free, the best judged
+# rank that is, so an empty answer means nothing can be started rather than
+# nothing is urgent. Then one untriaged item. The note saying which case this
+# is goes to stderr, keeping stdout one record per line.
+next_up() {
+  local open free pick
+  open=$(rows | open_only)
+  free=$(printf '%s\n' "$open" | awk -F'\037' 'NF && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/')
+  pick=$(printf '%s\n' "$free" | awk -F'\037' 'NF && $1<=1')
+  if [ -z "$pick" ]; then
+    # sorted on rank already, so the first judged row holds the best rank
+    pick=$(printf '%s\n' "$free" | awk -F'\037' 'NF && $1<=3 { if (top == "") top = $1; if ($1 == top) print }')
+    if [ -n "$pick" ]; then
+      echo "no critical or high work is free - the best available:" >&2
+    else
+      printf '%s\n' "$open" | awk -F'\037' 'NF && $8 ~ /CLAIMED/ {c++} NF && $8 ~ /BLOCKED/ {b++}
+        END { printf "nothing judged is free to start: %d claimed, %d blocked\n", c, b }' >&2
+    fi
+  fi
+  [ -z "$pick" ] || printf '%s\n' "$pick" | emit
+  # one untriaged item alongside the work: triage before you start. The
+  # filter reads to the end rather than head -1 closing the pipe, which
+  # under pipefail turns a long queue into a SIGPIPE exit
+  printf '%s\n' "$free" | awk -F'\037' 'NF && $2=="groom" && !n++' | emit
+}
+
 # Prepare every edit before touching the checkout. Git detects the rename when
 # the caller stages it; leave the index alone, including any staged user work.
 move_ticket() (
   local status="$1" id="${2%.md}" dry_run="${3:-}"
   local root src dst heading stage file candidate target index count=0 applied=0
-  local renamed=0 committed=0 result last_newline spec
+  local renamed=0 committed=0 result last_newline spec claim
   local -a files=()
   root="$(cd "$DIR/.." && pwd)"
   case "$status" in idea|spike|todo|issue|done|reject|spec|list) ;; *) echo "invalid status: $status" >&2; exit 1;; esac
@@ -204,6 +263,13 @@ move_ticket() (
   [ -f "$src" ] && [ ! -L "$src" ] || { echo "no regular ticket: $src" >&2; exit 1; }
   [ "$src" != "$dst" ] || { echo "already $status: $id.md" >&2; exit 1; }
   [ ! -e "$dst" ] && [ ! -L "$dst" ] || { echo "destination exists: $dst" >&2; exit 1; }
+  # every branch carries its own copy of project/, so a claimed ticket changes
+  # status on its claiming branch and reaches the default branch with the
+  # merge. Moved anywhere else, the two renames collide when it lands.
+  claim=$(claimer "$id")
+  if [ -n "$claim" ] && [ "${claim%%$'\t'*}" != "$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" ]; then
+    echo "$id.md is claimed by ${claim%%$'\t'*} at ${claim#*$'\t'} - move it there, or remove that worktree first" >&2; exit 1
+  fi
   heading=$(printf '%s' "$status" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
   stage=$(mktemp -d "${TMPDIR:-/tmp}/project-move.XXXXXX")
   trap '
@@ -301,6 +367,10 @@ move_ticket() (
   committed=1
   printf 'Moved; ## %s appended. Fill in the new section.\n' "$heading"
   if [ "$status" = done ]; then
+    # finishing is reconciling, not remembering - see Finishing in chat's SKILL.md
+    echo '  promised: each thing the ## Todo committed to, shipped or deferred - say which'
+    echo '  proof: the command that proves it, run now, and that it passed'
+    echo '  left: a link to wherever each deferred thing was filed'
     echo '  changelog: add a line to project/changelog.md if this changed something a reader would notice'
     spec=$(awk -F': ' '/^Spec: /{print $2; exit}' "$dst")
     if [ -n "$spec" ]; then
@@ -320,13 +390,8 @@ case "$cmd" in
 esac
 case "$cmd" in
   ''|help|-h|--help)
-    usage; [ -z "$cmd" ] && [ -d "$DIR" ] && { echo; rows | open_only | awk -F'\037' '$1<=1' | emit; } || true ;;
-  next)
-    rows | open_only | awk -F'\037' '$1<=1 && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | emit
-    # one untriaged item alongside the work: triage before you start. The
-    # filter reads to the end rather than head -1 closing the pipe, which
-    # under pipefail turns a long queue into a SIGPIPE exit
-    rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/ && !n++' | emit ;;
+    usage; [ -z "$cmd" ] && [ -d "$DIR" ] && { echo; next_up 2>&1; } || true ;;
+  next) next_up ;;
   groom) rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | emit ;;
   blocked)
     # the reason lives in the header, and the reason is the point
@@ -339,6 +404,47 @@ case "$cmd" in
     # a live worktree of the ticket's own name, no header to read
     git -C "$DIR/.." worktree list --porcelain \
       | awk -v main="$MAIN" '/^worktree /{p=substr($0,10)} /^branch refs\/heads\//{b=$0; sub(/^branch refs\/heads\//,"",b); if (b!=main) print b"\t"p}' ;;
+  resume)
+    # Where a claimed ticket stands, read from its worktree: the branch's copy
+    # of the ticket carries checkpoints the default branch has not seen yet.
+    n="${2:-}"
+    if [ -z "$n" ]; then
+      n=$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+      [ -n "$n" ] && [ "$n" != "$MAIN" ] || { echo "usage: project.sh resume <id> - or run it inside the ticket's worktree" >&2; exit 1; }
+    fi
+    claim=$(claimer "${n%.md}")
+    [ -n "$claim" ] || { echo "no live worktree claims $n - start one with /project:worktree $n" >&2; exit 1; }
+    branch=${claim%%$'\t'*}; path=${claim#*$'\t'}
+    printf 'branch\t%s\npath\t%s\n' "$branch" "$path"
+    # the whole change as one diff, which is what a review reads
+    printf 'review\tgit diff %s...%s\n' "$MAIN" "$branch"
+    printf 'commits\t%s since %s\n' "$(git -C "$path" rev-list --count "$MAIN..HEAD" 2>/dev/null || echo '?')" "$MAIN"
+    git -C "$path" log --format='  %h %s' "$MAIN..HEAD" 2>/dev/null || true
+    dirty=$(git -C "$path" status --short)
+    if [ -n "$dirty" ]; then printf 'uncommitted\n%s\n' "$(printf '%s\n' "$dirty" | sed 's/^/  /')"; else printf 'uncommitted\tnone\n'; fi
+    for part in $(printf '%s' "$branch" | tr '+' ' '); do
+      case " $STATUSES " in *" ${part%%-*} "*) ;; *) continue ;; esac
+      # found by its name after the status, whatever status the branch moved it to
+      ticket=$(for s in $STATUSES; do if [ -f "$path/project/$s-${part#*-}.md" ]; then echo "$s-${part#*-}.md"; break; fi; done)
+      [ -n "$ticket" ] || { printf 'ticket\t%s is not on this branch\n' "$part"; continue; }
+      printf 'ticket\t%s\n' "$path/project/$ticket"
+      # Only the section for the status the ticket holds now: a spike's
+      # checkpoint is history once the ticket is a todo. The newest checkpoint
+      # there is the current state; with none, the section itself is.
+      title="## $(printf '%s' "${ticket%%-*}" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+      awk -v title="$title" '
+        /^[[:space:]]*```/ { fenced = !fenced }
+        !fenced && /^## / { insec = ($0 == title); oncp = 0; if (insec) { sec = ""; cp = "" } }
+        insec { sec = sec $0 "\n" }
+        insec && !fenced && /^### Checkpoint/ { cp = ""; oncp = 1 }
+        oncp && !fenced && /^##?#? / && !/^### Checkpoint/ { oncp = 0 }
+        oncp { cp = cp $0 "\n" }
+        END {
+          if (cp != "") printf "\n%s", cp
+          else if (sec != "") printf "checkpoint\tnone under %s - the section itself:\n\n%s", title, sec
+          else printf "checkpoint\tno %s section - read the ticket\n", title
+        }' "$path/project/$ticket"
+    done ;;
   open)  rows | open_only | emit ;;
   all)   rows | newest | emit ;;
   board)
@@ -419,6 +525,21 @@ def anchors(text):
         counts[candidate] = 0
     return set(counts)
 
+def empty_section(text, title):
+    """Line of the last `## <title>` outside a fence when nothing is written under it, else None."""
+    lines, fenced, marks = text.split("\n"), False, []
+    for n, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and line.startswith("## "):
+            marks.append((n, line[3:].strip()))
+    for i in range(len(marks) - 1, -1, -1):
+        n, heading = marks[i]
+        if heading == title:
+            end = marks[i + 1][0] if i + 1 < len(marks) else len(lines)
+            return None if any(l.strip() for l in lines[n + 1:end]) else n + 1
+    return None
+
 def resolve(src, page):
     base = src.parent / page
     return next((c.resolve() for c in (base, Path(str(base) + ".md")) if c.exists()), None)
@@ -430,6 +551,14 @@ if not files:
 
 for f in files:
     name = str(f.relative_to(root))
+    # move appends the heading and nothing else, so an empty section for the
+    # status a ticket holds now is one nobody wrote. Earlier sections are
+    # history, left as written, so only the current one is held to this.
+    status = f.name.split("-", 1)[0]
+    if status in ("idea", "spike", "todo", "issue", "done", "reject"):
+        at = empty_section(f.read_text(), status.capitalize())
+        if at:
+            found.append(f"{name}:{at}: P005  nothing written under ## {status.capitalize()}")
     for n, line in prose(f.read_text()):
         for target in re.findall(r"\]\(([^)]+)\)", line):
             if re.match(r"^[a-z][a-z0-9+.-]*:", target):

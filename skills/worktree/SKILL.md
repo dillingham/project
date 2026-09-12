@@ -31,6 +31,10 @@ There is nothing to check out separately - `git worktree add` already checks the
 
 When [Herd](https://herd.laravel.com) is installed it also prints `http://<folder>.test`, since Herd serves every folder directly under a parked path - no server to start, no port to pick. That only holds if the worktrees folder is parked (`herd park` inside it, once). `https` needs `herd secure <folder>` first; it is not run automatically, since plain `http` already works with no setup.
 
+## Access outside the repo
+
+The worktrees folder sits outside the repo, and Claude Code keeps a session to the directory it started in plus any it was given. Until the folder is allowed, expect the shell to be put back in the repo after the `cd` and a permission prompt for every edit in the worktree. Allow it once, as an absolute path, under `permissions.additionalDirectories` in `~/.claude/settings.json`, or per session with `claude --add-dir <folder>` or `/add-dir`. It is `~/Worktrees` unless `PROJECT_WORKTREES` says otherwise. The plugin's live handoff trial ran with the folder added.
+
 ## Setup always runs, every time
 
 `git worktree add` only brings across what git tracks. Everything gitignored - dependencies, `.env`, the sqlite file, the build - has to be created fresh, and the script does that before it returns, for whichever of these the repo actually has:
@@ -53,6 +57,8 @@ A conflict applying moved changes (see `--take` below) skips the automated setup
 ## Claiming needs nothing extra
 
 The worktree itself is the claim - see [chat](../chat/SKILL.md) for how `CLAIMED` and `project.sh claimed` read that back from `git worktree list`. This skill only creates the worktree; it does not touch the board.
+
+It refuses a ticket a live worktree already claims - one joined into another branch with `+`, or one that changed status since its worktree opened - and names the worktree holding it. That refusal means the work was already started: resume it there (`/project:chat pick up <id>`) rather than picking a different id to get past it. Two starts at once take turns: the claim check and the worktree's creation run under one lock in the repository's shared git dir, let go before setup, so the second start sees the first one's claim.
 
 ## Moving dirty work off the default branch
 

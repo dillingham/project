@@ -44,6 +44,7 @@ Run everything the repository already checks:
 ```
 bash skills/cli/project.test.sh
 bash skills/docs/docs.test.sh
+bash skills/pr/pr.test.sh
 claude plugin validate .
 ```
 

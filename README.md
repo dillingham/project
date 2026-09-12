@@ -1,183 +1,94 @@
 # project
 
-A Claude Code plugin for running a project out of markdown: a board in `project/`, a git worktree per ticket, user docs in one house voice, and a QA hunt that pins every bug it finds with a failing test. A strong foundation for human-directed agentic development. It addresses several practical problems: discoveries interrupting the current task, decisions disappearing between sessions, and agents reporting progress without evidence.
+A Claude Code plugin that gives your agent the tools to automate project management and follow consistent Git and GitHub standards. The agent can maintain a Markdown board, set up worktrees, resume work across sessions, make meaningful commits, write docs, hunt bugs and prepare pull requests with linked context and test evidence. Specs, tickets and decisions stay in your repository; you control what gets merged.
+
+## Skills
+
+Speak naturally: "what's next?", "let's start on slugify", "remember this for later", or "carry on where we left off". The agent selects relevant skills as the conversation develops and offers to open a PR when the work is ready for review. You can also invoke them directly:
+
+| Skill | What the agent does |
+| --- | --- |
+| [/project:chat](skills/chat/SKILL.md) | Plans work, captures ideas and issues, tracks priorities and dependencies, investigates decisions, and resumes tickets. |
+| [/project:worktree](skills/worktree/SKILL.md) | Creates a ticket branch in its own worktree and sets up dependencies and the app environment. |
+| [/project:docs](skills/docs/SKILL.md) | Writes or reviews user documentation against the code and checks its house style. |
+| [/project:qa](skills/qa/SKILL.md) | Hunts bugs in a real browser and pins confirmed failures with reproducing tests. |
+| [/project:pr](skills/pr/SKILL.md) | Uses the current context to prepare or revise a PR, link related work, and validate the description. |
+| [/project:cli](skills/cli/SKILL.md) | Runs board commands directly and returns their raw output. With no arguments, shows the menu. |
+| [/project:contribute](skills/contribute/SKILL.md) | Changes this plugin in a source checkout, tests the changes, and prepares them for review. |
+
+## Git and GitHub standards
+
+- **One worktree per ticket.** A worktree claims its ticket so other sessions can see it is taken. The claim follows status changes, and ticket updates merge with the code.
+- **Meaningful commits.** Commit a coherent change, a settled decision or substantial progress worth preserving. Keep the ticket's stable name in the subject, such as `slugify: map Latin characters explicitly`, and explain useful reasoning in the body. User edits in shared files, and changes that depend on them, stay uncommitted for review.
+- **PRs with context and evidence.** `/project:pr` uses the current conversation and branch. Descriptions open with an overview, followed by `### Changes`, `### Related` and `### Testing`. Related work links specs, tickets and PRs; testing names commands, results and what was verified. A validator checks structure and style; the agent checks the claims against the work.
+- **Visible handoffs.** The agent reports the branch, latest commit, verification results, anything uncommitted, and a review command such as `git diff main...todo-slugify`. It distinguishes tests of the committed snapshot from tests of the working tree. PR publication follows your request; commits on the default branch and merges require your instruction.
+
+Your instructions and repository conventions take precedence over the plugin's defaults.
+
+## The board
+
+The board is a flat `project/` folder. Each file is named `{status}-{name}.md`, so a directory listing shows the state of the work:
+
+```text
+project/
+  idea-api-source.md
+  todo-slugify.md
+  issue-feed-dates.md
+  done-route-binding.md
+  spec-slugs.md
+```
+
+| Prefix | Meaning |
+| --- | --- |
+| `idea-` | A thought to consider. |
+| `spike-` | A question to investigate before choosing an approach. |
+| `todo-` | Decided work, described well enough to start. |
+| `issue-` | A known gap parked for later. |
+| `done-` | Completed work and the reasoning behind it. |
+| `reject-` | A considered approach that was declined or superseded. |
+| `spec-` | A feature definition, separate from its work items. |
+| `list-` | Small ideas or deferrals that do not yet need individual tickets. |
+
+**Capture without derailing.** An aside becomes a ticket in the active checkout, and the agent continues its original task. Priorities reflect impact: `low`, `medium`, `high` or `critical`. `groom` means the item has not been judged yet.
+
+**Choose available work.** `next` ranks work, excludes claimed or blocked tickets, and surfaces one item to triage. Dependency counts highlight blockers; `UNBLOCKED?` flags dependents worth revisiting when their blocker lands.
+
+**Resume with the reasoning intact.** Moving a ticket renames it, repairs references and appends a status section. Dated checkpoints preserve progress, failed approaches, open questions, the next action and a verification command. `resume` brings that context into a fresh session. The changelog links completed tickets into an account of what landed.
+
+```text
+/project:cli next
+/project:cli resume todo-slugify
+/project:cli move todo spike-api-source.md
+/project:cli check
+```
+
+See the [board guide](skills/chat/SKILL.md) for the full workflow.
 
 ## Install
 
-```
+```text
 /plugin marketplace add dillingham/project
 /plugin install project@dillingham
 ```
 
 Updates arrive with `/plugin marketplace update dillingham`.
 
-| Skill | Does |
-| --- | --- |
-| `/project:chat <question>` | answers anything about the work - what's next, what's open, file this, close that, let's spike X |
-| `/project:cli [command]` | runs the board script and prints its raw output; no arguments prints the menu |
-| `/project:worktree <id>` | starts work on a ticket in a fresh, fully set up git worktree |
-| `/project:docs [spec or page]` | writes, revises or lints the pages in `docs/` |
-| `/project:qa <feature>` | hunts a feature in a real browser for bugs the other suites cannot see |
-| `/project:contribute <change>` | changes this plugin itself - a rule, a skill, a script - in a checkout, tested, committed for review |
+Worktrees live in `~/Worktrees` by default. Allow that folder once using its absolute path in `permissions.additionalDirectories` in `~/.claude/settings.json`, or grant access for a session with `claude --add-dir ~/Worktrees`.
 
-Claude also reaches for each one on its own when the conversation calls for it - filing an aside you drop mid-task, or starting a worktree when you say "let's start on X".
+## Checks and settings
 
-## The board
+`ci.sh` checks the board and documentation for broken references and other consistency or style problems. Pin a released tag in CI:
 
-Every piece of work is one markdown file in `project/`, named `{status}-{name}.md`:
-
-```
-project/
-  issue-fields-injection.md
-  todo-next-up.md
-  done-resolution-ladder.md
-  spec-binding.md
-```
-
-The **status is the first word**. So `ls project/` is the board, and changing a ticket's status is renaming its file.
-
-### Dropping something in mid-session
-
-This is the part that earns the system.
-
-Say something in passing while an agent is working - "that reminds me, selects can't reach an API" - and it writes a file and keeps going:
-
-```
-filed issue-select-api-source.md
-```
-
-No stopping to decide where it belongs, no approval, no derail. The rule in the skill is *filing is never an interruption*. Same when the agent finds something itself that isn't the job in front of it.
-
-That only works because deciding is cheap, which is what the ticket types are for.
-
-### The ticket types
-
-| Prefix | Means | Usually becomes |
-| --- | --- | --- |
-| `idea-` | a raw thought, unexamined | `spike-`, or `reject-` |
-| `spike-` | a question to investigate, no committed outcome | `todo-`, or `reject-` |
-| `todo-` | decided, described well enough to start | `done-` |
-| `issue-` | a real gap, documented, deliberately not being worked now | `todo-` when scheduled |
-| `done-` | shipped, with the reasoning that got it there | stays |
-| `reject-` | considered and not taken, or superseded | stays |
-
-Two more that are not work items:
-
-- `spec-` is a feature definition. `spec-binding.md`, `spec-fields-select.md`.
-- `list-` is a holding pen of one-liners, like `list-minor.md`. Too small for their own files; promote one out when someone picks it up.
-
-`issue-` does the heavy lifting. It is the parking lot: real, written down, and consciously not today's job. Without it every finding is either a derail or a loss.
-
-### Asking about it
-
-```
-/project:chat what's next?
-/project:chat what's open?
-/project:chat anything about scoping?
-```
-
-Behind it is `project.sh`, which reads the folder and answers in one pass. `/project:cli` runs it directly:
-
-```
-$ /project:cli next
-high  issue  issue-fields-injection  2026-08-23 15:52  0d BLOCKS:5  fields() cannot take parameters  spec-blocks.md, spec-fields.md
-high  issue  issue-submit-entry-point  2026-08-23 15:52  0d  submit() and the Form entry point are unbuilt  spec-forms.md
-```
-
-The point is that an agent runs one command instead of grepping and reading twenty files. It is tab-separated on purpose - cheap to read, nothing to parse.
-
-### Moving a ticket
-
-```
-/project:cli move spike idea-select-api.md
-```
-
-This appends a `## Spike` section, renames the file, and updates references to its old filename throughout repository text files. **It preserves the reasoning above, repairing references even in older sections.** A ticket accumulates its own history:
-
-```markdown
-# Selects cannot reach an API
-
-## Idea
-Wondered whether options could come from somewhere other than a relation.
-
-## Spike
-Checked: a third source branch is cheap. Auth is not - an API source needs
-credentials the block does not have.
-
-## Done
-Shipped as `Options`, resolved from the container so it can take dependencies.
-```
-
-The wrong guess in `## Idea` is worth keeping. It is why the `## Done` looks the way it does.
-
-### What landed
-
-`project/changelog.md` is the readable half of the board. One line per landed change, newest first, each linking the `done-` ticket that carries the reasoning:
-
-```markdown
-## 2026-08-23
-
-- Route binding left the `#[Bind]` attribute for a binder, nested bindings scope by default - [done-binder.md](done-binder.md), [done-scoped-bindings-by-default.md](done-scoped-bindings-by-default.md)
-```
-
-It is not a second copy of the `done-` files. Those are the complete record and one per ticket; a changelog line is one per CHANGE, so a batch of related tickets collapses into a single entry with several links. `move done <filename>` prompts for the line at the moment you have just written the `## Done`, which is when the one-sentence version is cheapest.
-
-### Priority, and `groom`
-
-Every ticket carries one line:
-
-```
-Priority: groom | low | medium | high | critical
-```
-
-Judged by impact, never effort. `critical` is flat out wrong or hits every user; `low` is an edge case worth fixing.
-
-**`groom` means nobody has judged it yet.** It sorts below `low`, because an unknown is not a claim, and `/project:cli groom` is the queue. It exists so you can file something without pricing it in the moment - which is the whole reason filing stays cheap.
-
-### Blocked items
-
-Some tickets cannot start yet. They say so, and why:
-
-```
-Blocked: issue-fields-injection.md - same mechanism, one line each once it lands
-```
-
-A blocked ticket disappears from `next`, because offering work nobody can start is noise. It is not `groom` either - its priority is deferred, not unknown.
-
-You only write the blocked direction. The board counts backwards and shows `BLOCKS:5` on the blocker itself, which is usually the real argument for its priority.
-
-When a blocker ships, its dependents flag `UNBLOCKED?` and `/project:cli unblocked` lists them. Nothing is edited - the flag is a prompt to look, because "the blocker shipped" does not always mean "this can start".
-
-### Automatic grooming
-
-The queue drains by itself in two places, both tool-driven so nobody has to remember:
-
-- **`next`** surfaces one `groom` item alongside the real work. Triage before you start, which can change what you pick.
-- **`move done <filename>`** shows the untriaged tickets sharing that spec. You just finished the work, so you have the context they need, and it costs a glance.
-
-What is deliberately *not* automated is the priority itself. An agent assigning one cold has less context than you do, and a guess with a confident reason underneath is worse than an honest `groom`.
-
-### Claiming
-
-A ticket is claimed by the worktree `/project:worktree` opens for it - its branch is named after the ticket, and `git worktree list` is shared by every checkout, so there is no header to write. A claimed ticket shows `CLAIMED` and drops out of `next` until the worktree is removed.
-
-## CI
-
-`ci.sh` runs every check the plugin ships against the repo it is run in: `project.sh check` on `project/` (broken links, missing anchors, bare ticket names, code citing a spec that is gone) and `docs.sh lint` on `docs/` (house style, broken links and anchors, links into `project/`, example width). Pin it to a tag, so a new release never turns a build red by itself:
-
-```
+```sh
 curl -fsSL https://raw.githubusercontent.com/dillingham/project/v0.3.0/ci.sh | bash -s v0.3.0
 ```
 
-## Settings
-
-| Variable | Default | For |
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `PROJECT_STALE_DAYS` | `30` | days idle before a ticket sorts up one priority |
-| `PROJECT_WORKTREES` | `~/Worktrees` | where `/project:worktree` puts worktrees |
-| `DOCS_DIR` | `docs/` | where `/project:docs` looks for pages |
-| `DOCS_EXAMPLE_WIDTH` | `62` | the widest line a `docs/` example may carry |
+| `PROJECT_STALE_DAYS` | `30` | Days idle before a judged, available ticket moves up one priority level. |
+| `PROJECT_WORKTREES` | `~/Worktrees` | Where ticket worktrees are created. |
+| `PROJECT_LOCK_WAIT` | `60` | Seconds a worktree start waits for another start to finish. |
+| `DOCS_DIR` | `docs/` | Where documentation is read and checked. |
+| `DOCS_EXAMPLE_WIDTH` | `62` | Maximum line width for documentation examples. |
 
-## Changing it
-
-[skills/chat/SKILL.md](skills/chat/SKILL.md) is the operating manual an agent reads. [skills/chat/decisions.md](skills/chat/decisions.md) is why each of these is shaped the way it is, and which obvious alternatives were tried and rejected - read that one before changing how any of this works. `bash skills/cli/project.test.sh` exercises the move command in throwaway repositories.
+For the reasoning behind the workflow, read [decisions.md](skills/chat/decisions.md). To change the plugin, follow the [contribution guide](skills/contribute/SKILL.md).

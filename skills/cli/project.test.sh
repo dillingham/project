@@ -223,4 +223,89 @@ contains "$TEMP/output" 'no heading on spec-dup.md for #usage-3'
 [ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: a heading id was handed out twice' >&2; cat "$TEMP/output" >&2; exit 1; }
 ok 'a numbered heading id is never handed out twice'
 
+fixture
+printf '# Middling\n\nPriority: medium\n\n## Todo\n\nx\n' > "$FIXTURE/project/todo-middling.md"
+printf '# Minor\n\nPriority: low\n\n## Todo\n\nx\n' > "$FIXTURE/project/todo-minor.md"
+run next
+contains "$TEMP/output" 'no critical or high work is free'
+contains "$TEMP/output" 'todo-middling'
+contains "$TEMP/output" 'todo-example'
+if grep -q 'todo-minor' "$TEMP/output"; then echo 'FAIL: next offered a lower rank beside the best one' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'with nothing urgent, next offers the best available rank and says so'
+
+fixture
+printf '# Renamed\n\nPriority: high\n\n## Spike\n\nx\n\n## Todo\n\nx\n' > "$FIXTURE/project/todo-renamed.md"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b spike-renamed
+run open
+grep -q 'todo-renamed.*CLAIMED' "$TEMP/output" || { echo 'FAIL: the claim did not follow the rename' >&2; cat "$TEMP/output" >&2; exit 1; }
+run next
+contains "$TEMP/output" 'nothing judged is free to start: 1 claimed, 0 blocked'
+if grep -q 'todo-renamed' "$TEMP/output"; then echo 'FAIL: next offered a claimed ticket' >&2; exit 1; fi
+cp "$FIXTURE/project/todo-renamed.md" "$TEMP/before"
+if run move done todo-renamed; then echo 'FAIL: moved a ticket claimed by another branch' >&2; exit 1; fi
+cmp "$TEMP/before" "$FIXTURE/project/todo-renamed.md"
+contains "$TEMP/output" 'claimed by spike-renamed'
+(cd "$TEMP/worktree $passed" && bash "$SCRIPT" move done todo-renamed > /dev/null) || { echo 'FAIL: the claiming branch could not move its ticket' >&2; exit 1; }
+ok 'a claim follows its ticket through a status change, and only its branch may move it'
+
+fixture
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+WT="$TEMP/worktree $passed"
+git -C "$FIXTURE" worktree add -q "$WT" -b todo-example
+printf '\n### Checkpoint 2026-09-01\n\nNext: the old plan.\n\n### Checkpoint 2026-09-12\n\nFailed: the first approach.\nNext: the second approach.\n' >> "$WT/project/todo-example.md"
+git -C "$WT" -c user.name=Test -c user.email=test@example.test commit -qam checkpoint
+echo wip > "$WT/wip.txt"
+run resume todo-example
+contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$WT" rev-parse --show-toplevel)")"
+contains "$TEMP/output" '1 since'
+contains "$TEMP/output" '...todo-example'
+contains "$TEMP/output" '?? wip.txt'
+contains "$TEMP/output" 'Next: the second approach.'
+if grep -q 'the old plan' "$TEMP/output"; then echo 'FAIL: resume showed a superseded checkpoint' >&2; exit 1; fi
+(cd "$WT" && bash "$SCRIPT" resume) > "$TEMP/output" 2>&1
+contains "$TEMP/output" 'Next: the second approach.'
+if run resume todo-missing; then echo 'FAIL: resumed a ticket nothing claims' >&2; exit 1; fi
+ok 'resume reads the newest checkpoint from the branch copy, beside the worktree and its state'
+
+fixture
+cat > "$FIXTURE/project/todo-example.md" <<'DOC'
+# Cache
+
+Priority: high
+
+## Spike
+
+### Checkpoint 2026-09-01
+
+Next: ask the user to choose a cache lifetime.
+
+## Todo
+
+Approved: cache per request, decided 2026-09-05.
+DOC
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+WT="$TEMP/worktree $passed"
+git -C "$FIXTURE" worktree add -q "$WT" -b spike-example
+run resume todo-example
+contains "$TEMP/output" 'none under ## Todo'
+contains "$TEMP/output" 'Approved: cache per request'
+if grep -q 'ask the user' "$TEMP/output"; then echo 'FAIL: resume offered a spike checkpoint on a todo' >&2; cat "$TEMP/output" >&2; exit 1; fi
+printf '\n### Checkpoint 2026-09-12\n\nNext: wire it in.\n' >> "$WT/project/todo-example.md"
+run resume todo-example
+contains "$TEMP/output" 'Next: wire it in.'
+if grep -q 'ask the user' "$TEMP/output"; then echo 'FAIL: resume offered a spike checkpoint on a todo' >&2; exit 1; fi
+ok 'resume reads only the current section, and shows that section when it has no checkpoint'
+
+fixture
+printf '# Shipped\n\nPriority: low\n\n## Todo\n\n## Done\n\n' > "$FIXTURE/project/done-shipped.md"
+printf '# Written\n\nPriority: low\n\n## Todo\n\n## Done\n\n```text\nexample\n```\n' > "$FIXTURE/project/done-written.md"
+if run check; then echo 'FAIL: check passed a ## Done nobody wrote' >&2; exit 1; fi
+contains "$TEMP/output" 'project/done-shipped.md:7: P005  nothing written under ## Done'
+[ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: check held history or a fenced example against the ticket' >&2; cat "$TEMP/output" >&2; exit 1; }
+ok 'check flags a current section nobody wrote, and leaves earlier sections alone'
+
 printf '%s scenarios passed.\n' "$passed"

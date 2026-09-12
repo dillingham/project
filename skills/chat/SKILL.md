@@ -1,6 +1,6 @@
 ---
 name: chat
-description: "Use for any question about what to work on next, what is open, what is stale, or what belongs to a feature - and for filing, finding or moving work in project/ - capturing an idea or aside the user drops mid-task, recording a finding you are not fixing now, promoting a spike into committed work, closing something as done, rejecting it, or answering what is open. Every file in project/ is {status}-{name}.md and the status is the first word, so changing status is a rename. Files ACCRETE sections (## Idea, ## Spike, ## Todo, ## Done) rather than being rewritten. Also covers where a thing belongs: project/spec-* for design, project/ for work, docs/ for user-facing. Invoked as /project:chat with a question, it runs the bundled project.sh and answers directly. The board ranks by priority and bumps anything idle past 30 days."
+description: "Use for any question about what to work on next, what is open, what is stale, or what belongs to a feature - and for filing, finding or moving work in project/ - capturing an idea or aside the user drops mid-task, recording a finding you are not fixing now, promoting a spike into committed work, closing something as done, rejecting it, picking up work an earlier session left in a worktree, or answering what is open. Every file in project/ is {status}-{name}.md and the status is the first word, so changing status is a rename. Files ACCRETE sections (## Idea, ## Spike, ## Todo, ## Done) rather than being rewritten. Also covers where a thing belongs: project/spec-* for design, project/ for work, docs/ for user-facing. Invoked as /project:chat with a question, it runs the bundled project.sh and answers directly. The board ranks by priority and bumps anything idle past 30 days."
 ---
 
 # project/
@@ -21,14 +21,15 @@ Running it with no arguments prints its own menu followed by what to pick up, so
 
 | They asked | Run | Then |
 | --- | --- | --- |
-| "what's next", "what should I work on", nothing at all | `$P next` | Name the top one or two, say what each is and what it blocks, offer to start. |
+| "what's next", "what should I work on", nothing at all | `$P next` | Name the top one or two, say what each is and what it blocks, offer to start. A note that no critical or high work is free means the rows are the best available, not urgent - say so. A note that nothing judged is free means every open ticket is claimed, blocked or untriaged - say which, never "nothing to do". |
+| "pick up X", "where was I", "carry on", a fresh session on work already started | `$P resume <id>`, or `$P resume` inside its worktree | `cd` to the path it prints, run its `Verify:` to confirm what you inherited, then continue from `Next:`. See Checkpoints below. |
 | "yes" (to that offer), "let's start on X", "spin up a worktree for X" | invoke the **worktree** skill (`/project:worktree <id>`) | Starting is never anything less than this - see Worktrees below. Report the path it printed, or the abort reason verbatim, then work there. Always invoke the skill itself, never just describe what it would do. |
 | "what spike should we work on", "any open ideas" | `$P spike` / `$P idea` | Same, scoped to that status. |
 | "what's open", "how much is left" | `$P board` then `$P open` | Lead with the counts, then the list. |
 | "what's happening with binding" | `$P spec binding` | Group by status in the reply: what shipped, what is open. |
 | "is there anything about X" | `$P find X` | No rows means no match. Say so; do not guess. |
 | "add/remember/file X" | `$P new <status> <name>` | Write the body, then one line confirming. |
-| "that's done", "close it" | `$P move done <filename>` | Fill in the `## Done` it appends. |
+| "that's done", "close it" | `$P move done <filename>`, on the ticket's own branch | Reconcile first and fill in the `## Done` it appends - see Finishing below. |
 | "what shipped", "what landed this week", "what changed" | `cat project/changelog.md` | Answer from the top of it. The links go to the ticket carrying the reasoning. |
 | "latest todo", "what was added last", "what's new" | `$P show todo` (or whichever status they named) | One command: it prints the id it picked, then that whole file. Answer from it - do not list first. |
 | "let's spike X", "spike out X", "design X" | `$P spec X` then `$P find X` | Do not answer in prose. Run the spike session below. |
@@ -80,7 +81,52 @@ Sub-topics group by name rather than by folder: `spec-fields-select.md`, `spec-f
 
 Starting work on a ticket is never just editing files in place - it is always the **worktree** skill first, then `cd` into the path it prints, before touching anything else. There is no lighter-weight "start" - every ask is a worktree, and it is a skill invocation, not a bash command you run inline. See [worktree](../worktree/SKILL.md) for what it does, what it always sets up (dependencies, env, keys, migrations, the frontend build - whichever the repo uses), and `--take` for moving dirty main work into its own branch; this file only says when to reach for it.
 
-**Claiming needs nothing extra - the worktree itself is the claim.** The branch it creates is named exactly `<id>` (no repo prefix - branches already live in this repo's own ref space, so there is nothing to disambiguate), and `git worktree list` is shared across every worktree of the same repo, visible instantly with no commit and no header line to write or drift. `next`, `open` and `groom` all check it: a ticket with a live worktree of its own name shows `CLAIMED` and drops out of `next` and out of the one-to-triage groom pick, the same way a `Blocked:` ticket does, until `git worktree remove` clears it. `$P claimed` lists what is live right now.
+**Claiming needs nothing extra - the worktree itself is the claim.** The branch it creates is named exactly `<id>` (no repo prefix - branches already live in this repo's own ref space, so there is nothing to disambiguate), and `git worktree list` is shared across every worktree of the same repo, visible instantly with no commit and no header line to write or drift. `next`, `open` and `groom` all check it: a live worktree claims the ticket its branch names, matched on the name after the status word, so a `spike-` that becomes a `todo-` mid-work stays claimed by the branch opened for the spike. A claimed ticket shows `CLAIMED` and drops out of `next` and out of the one-to-triage groom pick, the same way a `Blocked:` ticket does, until `git worktree remove` clears it. `$P claimed` lists what is live right now. The worktree skill refuses a ticket that is already claimed, joined ids included, and names the worktree holding it - resume there instead.
+
+Claims are shared by every worktree of the repo, but each branch carries its own copy of `project/`. So a claimed ticket changes status on its own branch, and the change reaches the default branch when that branch merges. `move` refuses a claimed ticket anywhere else: move it on its branch, or remove the worktree first when the work is abandoned.
+
+## Checkpoints, and resuming
+
+A worktree says where the work lives and the ticket says what it is for. Neither says where it stands, so a session that stops with a ticket unfinished appends a checkpoint inside the ticket's current section, in the worktree's copy of the ticket, where it travels with the branch:
+
+```markdown
+### Checkpoint 2026-09-12
+
+Done: Options resolves from the container; `SelectTest` covers relation and closure sources.
+Failed: resolving in the constructor - the container is not booted yet. Do not retry it.
+Open: whether an API source caches per request or per block.
+Next: the API source, from `Select::resolveOptions()`.
+Verify: `php artisan test --filter=Select`
+```
+
+Write one whenever you stop mid-ticket, hand it to another session, or abandon an approach the next session would otherwise try again. **Each checkpoint is a complete handoff**, because `resume` shows only the newest: carry forward every failed approach and open question that still applies, and drop only what is resolved. A checkpoint with just `Done:` and `Next:` hides an earlier `Failed:` that still holds from the one session that needed it. The goal is not restated: the section above owns it. Checkpoints append like everything else - the newest is the current state and the ones above it are what was tried, which is exactly what a rewritten status block would have erased.
+
+`$P resume <id>` reads it back: the worktree's path and branch, the commits it carries past the default branch, what is uncommitted, and the newest checkpoint in the ticket's current section, read from the branch's copy, which the default branch has not seen. With no checkpoint in that section, it prints the section instead. A status change leaves earlier checkpoints behind as history, so the new section states whatever in them still holds. Inside the worktree, `$P resume` alone resumes the branch you are on. A fresh session asked to pick something up runs it before anything else, `cd`s to the path, runs `Verify:`, and continues from `Next:` - it does not redo what the checkpoint says is done.
+
+**Commit when the work reaches something worth keeping** - a coherent change, a settled decision, or substantial unfinished progress. A checkpoint on disk survives a restart, but it is outside history until committed and it goes wherever the worktree goes. A pause or a handoff alone does not call for a commit: checkpoint wording and routine bookkeeping ride along with the next meaningful one. Unfinished progress, once committed, has its checkpoint say what is incomplete or failing.
+
+- **Lead the subject with the ticket's stable name** - the part after the status, `slugify` for `todo-slugify.md` - in the repo's own commit style: `slugify: map ß, ø and æ explicitly`, or `feat(slugify): ...` under Conventional Commits. The name survives every status change, so `git log --grep` finds the ticket's whole history. The subject says what changed; add a body when the reasoning, a rejected approach or a tradeoff would help the next agent.
+- **Commit only what is the task's.** A worktree is shared with the user. Stage the task's paths with `git add -A -- <paths>`, which takes new files and a `move`'s rename, then `git commit -- <paths>` with the same paths. Staging outside those paths is preserved; inside them git takes the whole working-tree file, which is why a file that also carries the user's changes stays out entirely and is named in the handoff - telling their hunks from yours is a guess, and a wrong guess puts their change in your commit.
+- **Keep the commit coherent.** Leaving a file out can leave a snapshot that does not build, even though the working tree passed. When the change needs an excluded file, the parts that depend on it stay uncommitted too, named in the handoff. Say whether verification ran against the committed snapshot or the working tree.
+- **Never commit on the default branch, and never merge,** unless asked. The default branch moves by the user's merge, which is where the work is reviewed.
+- **Review is not implementation.** Reviewing a branch, in whatever checkout, edits, stages and commits nothing unless the user asks for fixes.
+
+Each handoff names the branch, its latest commit, the verification run and its result, anything still uncommitted, and the command that reviews the whole change: `git diff <default>...<branch>`. When the user's or the repo's own rules say otherwise about committing, those rules win.
+
+## Finishing
+
+Moving a ticket to `done-` claims the work landed, so reconcile before making the claim:
+
+- **What was promised.** Each thing the `## Todo` committed to either shipped or was deferred, and the `## Done` says which.
+- **The proof.** Run the newest checkpoint's `Verify:`, or the cheapest command that proves the change, now. The `## Done` names it and says it passed. A result from earlier in the session is a memory, not evidence.
+- **What was left.** Everything deferred is filed - its own ticket, or a line in a `list-` - and linked from the `## Done`. "Not done" with no link is invisible the day the ticket closes.
+- **Where it lands.** Run `move done` on the ticket's own branch, as part of the work, so the rename reaches the default branch in the same merge as the code. The default branch then shows `done-` exactly when the change is there, and never for a branch that was abandoned.
+
+`move done` prints this list, and `$P check` flags a ticket whose current section is still empty (`P005`), so a `## Done` nobody wrote does not pass.
+
+When the conversation reaches a coherent implementation ready for review, use [pr](../pr/SKILL.md) to prepare and validate its title and description, then offer to open the pull request. Make the offer when the work becomes ready, rather than at every pause. If the user already asked for a PR, follow that request without asking again.
+
+Merging is the user's call. Once the branch has merged, the worktree's job is over: offer `git worktree remove <path>` and `git branch -d <branch>`, both of which refuse when something would be lost. A worktree left standing still claims its ticket and still shows in `$P claimed`.
 
 ## Spiking a subject
 
@@ -133,6 +179,8 @@ A spike ends with files, not a wall of text.
 ## Filing is never an interruption
 
 When the user drops an aside mid-task, or you find something real that is not the job in front of you: **write the file and keep going.** Do not derail to fix it. Do not drop it because you are busy. Say one line - "filed `issue-x.md`" - and continue. Never stop for approval on a file that only records a thought.
+
+**File it in the checkout you are working in.** Inside a worktree, that is the worktree: the file reaches the default branch in the same merge as the work, a link to it from the ticket resolves on both sides, and the default branch stays clean. Filed on the default branch mid-ticket, it breaks all three - each side links a file only the other has, so `check` fails on both until the merge, and the stray file makes the next worktree start refuse.
 
 ## Never rewrite. Append.
 

@@ -85,6 +85,59 @@ restore() {
 trap restore EXIT
 abort() { echo "$1" >&2; exit 1; }
 
+# Two starts at once would both pass the claim check below before either had
+# created its worktree, so check-and-create run under a lock on a file in the
+# repository's common git dir, which every worktree shares. It is an flock on
+# this shell's fd 9, taken through python3 because macOS has no flock(1): the
+# kernel drops it once no process holds that fd, however they died, so
+# there is never a stale lock to judge and take over. The file itself stays.
+# It is let go the moment the worktree exists, before the slow setup.
+command -v python3 >/dev/null || abort "python3 is needed to lock the worktree start, aborting"
+lock="$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)/project-worktree.lock"
+exec 9>>"$lock"
+# A child inherits fd 9 and holds the lock for as long as it lives. The one
+# git that creates a claim keeps it: killed mid-creation, this shell leaves
+# `worktree add` running, and the lock has to outlast it. fsmonitor is off for
+# the add, so no daemon its checkout starts can inherit the lock. Every other
+# git runs without it - a fetch can leave maintenance or a credential daemon
+# behind long after it returns, and none of those can claim anything.
+git() {
+  case " $* " in
+    *" worktree add "*) command git -c core.fsmonitor=false "$@" ;;
+    *) command git "$@" 9>&- ;;
+  esac
+}
+python3 -c '
+import fcntl, sys, time
+end = time.time() + float(sys.argv[1])
+while True:
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        break
+    except BlockingIOError:
+        if time.time() >= end:
+            sys.exit(1)
+        time.sleep(0.2)
+' "${PROJECT_LOCK_WAIT:-60}" || abort "another worktree start has held $lock for ${PROJECT_LOCK_WAIT:-60}s, aborting"
+
+# One live worktree per ticket. The board matches a claim on the name after
+# the status word, across + joins, so todo-a+todo-b is refused while any
+# worktree holds todo-a - or holds spike-a, opened before it became a todo.
+claims=$(git -C "$mainpath" worktree list --porcelain | awk -v base="$base" -v want="$n" -v statuses="idea spike todo issue done reject spec list" '
+  function slug(id,   s) {
+    s = id; sub(/-.*/, "", s)
+    if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
+    sub(/^[^-]*-/, "", id); return id
+  }
+  BEGIN { k = split(want, mine, "+"); for (i = 1; i <= k; i++) { s = slug(mine[i]); if (s != "") ours[s] = mine[i] } }
+  /^worktree / { p = substr($0, 10) }
+  /^branch refs\/heads\// {
+    b = substr($0, 19); if (b == base) next
+    k = split(b, part, "+")
+    for (i = 1; i <= k; i++) { s = slug(part[i]); if (s in ours) print ours[s] " is already claimed by " b " at " p }
+  }')
+[ -z "$claims" ] || abort "$claims - resume it there (project.sh resume ${n%%+*}), or remove that worktree first"
+
 git -C "$mainpath" show-ref --verify --quiet "refs/heads/$n" \
   && abort "branch $n already exists, aborting - resume there or pick a different id"
 dest="$WORKTREES/$folder"
@@ -113,6 +166,8 @@ fi
 mkdir -p "$WORKTREES" || abort "cannot create $WORKTREES, aborting"
 git -C "$mainpath" worktree add "$dest" -b "$n" "$base" || abort "worktree add failed, aborting"
 trap - EXIT
+# the claim is live now, so the next start waiting on the lock will see it
+exec 9>&-
 
 # Herd serves every folder directly under a parked path as <folder>.test, so
 # there is no server to start. Without Herd there is no URL to promise.

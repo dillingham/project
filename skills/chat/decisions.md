@@ -92,3 +92,51 @@ If you change state to demonstrate something, undo it and confirm the undo. A de
 Replacement follows exact filenames throughout repository text, including bare mentions and code examples. An example naming the actual ticket follows the rename; a different illustrative filename does not match. This avoids asking an agent to classify each mention, and covers references a Markdown-only link parser would miss. Git ignores keep dependencies and generated files outside the operation.
 
 The command prepares its edits before writing, rejects collisions, offers `--dry-run`, and restores files on a write failure. It leaves staging to the caller so an unrelated staged change is not disturbed. `mv <id> <status>` remains an alias for existing callers.
+
+## Claims follow the name, not the filename
+
+A worktree's branch is named for its ticket when it opens, and the ticket keeps moving after that - a spike becomes a todo mid-work. Matching the whole id dropped the claim at the first rename, and let a second worktree open on the renamed ticket. The name after the status word is the part a status change never touches, which is the same reason status is the first word.
+
+Rejected: renaming the branch along with the ticket. The branch is the checkout a live session is standing in, and the rename would have to happen from whichever checkout ran the move.
+
+Each branch carries its own copy of `project/` while claims are shared across all of them, so a claimed ticket is moved only on its claiming branch. Moved on the default branch as well, the two renames collide when the branch merges, and the collision surfaces long after anyone remembers why.
+
+Checking for a claim and creating the worktree are one step, under a lock in the repository's common git dir, which every worktree shares. Without it, two starts launched together both find no claim and both create one. The lock is let go as soon as the worktree exists, so a second start waits seconds, not through the first one's dependency install.
+
+The lock is an `flock` the kernel holds for the process, not a file whose existence is the lock. Rejected: a pid file or symlink with stale-lock takeover. Two waiters can read the same dead owner; one removes it and takes a fresh lock, and the other, acting on what it read, removes that live lock too. A check before the delete narrows the gap without closing it. A kernel lock dies with its holder, so there is nothing stale to judge.
+
+Every child that inherits the lock holds it until it exits, so which children get it is a choice. `git worktree add` keeps it: a start killed mid-creation leaves the add running, and a lock released with the shell let a second start claim the same ticket while the orphan finished. Every other git runs without it, since a fetch can leave maintenance or a credential daemon running long after it returns, holding the lock with nothing to claim.
+
+## next never answers with nothing when there is work
+
+`next` leads with critical and high, because that is what to work on. With none free, it offers the best judged rank that is, instead of printing nothing: an empty answer reads to an agent as an empty board, and the agent stops or invents work. A note on stderr says which case the rows are, leaving stdout one record per line.
+
+`groom` stays out of that fallback. The one-to-triage pick already surfaces it, and offering an untriaged ticket as work would price it by omission.
+
+## Checkpoints append; there is no current-state block
+
+Rejected: a rewritten "current state" section at the top of each ticket. It would be the one part of the file that is rewritten, so the approach that failed last session gets overwritten by the one being tried now - the history the next session most needs. A dated checkpoint appended to the current section gives the same answer, since the newest one is the current state, and keeps what was tried, the way spike answers are recorded as each group lands.
+
+Rejected: a goal line in the checkpoint. The `## Todo` owns the goal, and a second copy drifts.
+
+Each checkpoint is complete, carrying forward whatever failed or is open and still applies, because `resume` shows only the newest and a partial one hides the rest. `resume` reads only the section for the ticket's current status: a spike's checkpoint says what to do while it is a spike, and once it is a todo that instruction is history, however recent.
+
+## done lands with the merge
+
+`move done` runs on the ticket's own branch, so the rename merges with the code. Moved on the default branch after the merge, there is a window where the code is in and the board says todo; moved before, `done-` claims a landing that may never happen. Neither needed a new status.
+
+An aside filed mid-ticket lands the same way, from the worktree. A live trial filed one on the default branch while the ticket's `## Done`, on its branch, linked it: each side then linked a file only the other had, `check` failed on both, and the untracked file left the default branch too dirty for the next worktree start. Filing where the work is costs the aside its visibility on the default branch until the merge, which is the same wait every other change on that branch has.
+
+`move` appends a heading and nothing under it, so finishing depended on the agent remembering to write the `## Done`. `check` now fails a ticket whose CURRENT section is empty. Earlier sections are exempt, empty or not: they are history, and history is never rewritten to satisfy a lint.
+
+## Agents commit on ticket branches
+
+The first live trial ran five sessions and none committed: every checkpoint and change lived only in a worktree's working tree, outside history and gone with the worktree. An unstaged diff works as a review surface for one agent in one checkout. With a worktree per ticket, the branch is the review surface - `git diff <default>...<branch>` is the whole change, and its log is the steps.
+
+So implementation commits when the work reaches a coherent change, a settled decision, or substantial unfinished progress. The default branch still moves only by the user's merge, which is where review happens. Review-only work commits nothing, in any checkout: what an agent may do follows the task, not the directory.
+
+The subject leads with the ticket's name after its status, for the reason claims match on it: the status changes and the name does not, so one `git log --grep` finds the ticket from idea to done.
+
+The commit names its paths, `git commit -- <paths>`. Staging outside those paths is preserved; inside them git takes the working-tree file whole, so a file both of them changed cannot be among them - it is left out and named. Leaving it out can break the snapshot when committed files depend on it, so those stay out with it, and the handoff says whether verification covered the commit or the working tree. Rejected: staging the agent's hunks out of a shared file. `git add -p` is interactive, and after a restart the agent cannot tell its hunks from the user's; a wrong guess commits the user's change under the agent's message.
+
+Rejected: a commit at every stop or every handoff. Most pauses are conversational, and a commit per pause buries the steps worth reading; the checkpoint rides along with the next commit that means something.
