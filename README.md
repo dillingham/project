@@ -1,5 +1,7 @@
 # project
 
+A strong foundation for human-directed agentic development. It addresses several practical problems: discoveries interrupting the current task, decisions disappearing between sessions, and agents reporting progress without evidence.
+
 A Claude Code plugin for running a project out of markdown: a board in `project/`, a git worktree per ticket, user docs in one house voice, and a QA hunt that pins every bug it finds with a failing test.
 
 ## Install
