@@ -1,0 +1,13 @@
+{
+  "name": "project",
+  "version": "0.1.0",
+  "description": "A markdown project board in project/, a worktree per ticket, docs in one house voice, and a QA hunt that pins every bug with a failing test.",
+  "author": {
+    "name": "dillingham",
+    "url": "https://github.com/dillingham"
+  },
+  "homepage": "https://github.com/dillingham/project",
+  "repository": "https://github.com/dillingham/project",
+  "license": "MIT",
+  "keywords": ["project-management", "tickets", "worktree", "docs", "qa"]
+}

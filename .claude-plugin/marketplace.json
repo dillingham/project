@@ -1,0 +1,16 @@
+{
+  "name": "dillingham",
+  "owner": {
+    "name": "dillingham"
+  },
+  "metadata": {
+    "description": "Claude Code plugins by dillingham."
+  },
+  "plugins": [
+    {
+      "name": "project",
+      "source": "./",
+      "description": "A markdown project board in project/, a worktree per ticket, docs in one house voice, and a QA hunt that pins every bug with a failing test."
+    }
+  ]
+}
