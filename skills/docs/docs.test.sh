@@ -128,3 +128,38 @@ printf '# Deep\n\n## Introduction\n\nSee [gone](missing.md).\n' > "$TEMP/docs/in
 out=$(cd "$TEMP" && bash "$SCRIPT" lint 2>&1 || true)
 expect 'docs/internals/deep.md:5: D040  link to a file that does not exist: missing.md'
 echo 'PASS: linting every page reaches pages in subfolders'
+
+# A maintainer's review report is not a user page: it keeps its links and its
+# formatting honest, and owes nothing to the page skeleton or the prose rhythm.
+cat > "$TEMP/docs/report.review.md" <<'DOC'
+# Review of a page
+
+## 1. The first finding
+
+One.
+
+Two.
+
+Three.
+
+Four.
+
+Five.
+
+Six, with no code in sight, and a [broken link](missing.md).
+
+## 2. The second finding
+
+- a
+- b
+- c
+- d
+- e
+
+A line with an em-dash — in it.
+DOC
+out=$(cd "$TEMP" && bash "$SCRIPT" lint report.review.md 2>&1 || true)
+expect 'docs/report.review.md:15: D040  link to a file that does not exist: missing.md'
+expect 'docs/report.review.md:25: D024'
+for code in D001 D002 D003 D012 D026; do refuse "$code"; done
+echo 'PASS: a review report is held to links and formatting, not to the page skeleton or rhythm'

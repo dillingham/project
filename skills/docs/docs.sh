@@ -97,7 +97,10 @@ Links
 Machinery that belongs to a docs website, not to a repository
   D030  <a name="..."> anchor
   D031  {{version}} in a link
-  D032  <div class="..."> or <style> block"""
+  D032  <div class="..."> or <style> block
+
+A *.review.md report answers to links and formatting only: D001-D003, D012,
+D015, D026 and D042 skip it."""
 
 if cmd == "rules":
     print(RULES); sys.exit(0)
@@ -106,6 +109,11 @@ INTERNALS = r"\b(base class|under the hood|behind the scenes|internally|is not d
 WARMTH = r"\b(convenient(ly)?|expressive|powerful|beautiful|blazing|wonderful|enjoyable|effortless|seamless)\b"
 CONTRACTION = r"\b(don't|doesn't|didn't|can't|won't|isn't|aren't|wasn't|weren't|hasn't|haven't|couldn't|shouldn't|wouldn't|it's|that's|there's|you'll|you're|they're)\b"
 ADVISORY = {"D023", "D026", "D027"}
+# A *.review.md report is a maintainer's critique of a page, not a page: it
+# answers to links and formatting, never to the page skeleton, the rhythm, or
+# the rules about what a reader of docs/ may be sent to. It quotes errors at
+# whatever width they came, and cites the ticket that owns the gap.
+REVIEW_EXEMPT = {"D001", "D002", "D003", "D012", "D015", "D026", "D042"}
 WIDTH = int(os.environ.get("DOCS_EXAMPLE_WIDTH", "62"))
 PROJECT = os.path.realpath(os.environ.get("PROJECT_DIR", "project"))
 TICKET = r"(?<![\w/.-])((?:spec|done|todo|idea|spike|issue|reject)-[a-z0-9_-]+\.md)"
@@ -303,14 +311,10 @@ def lint(path):
             hit(n2, "D025", "hard-wrapped paragraph; one line per paragraph")
 
     # --- links, and the line between docs/ and project/
-    # A *.review.md sidecar is a critique addressed to us: it quotes errors at
-    # whatever width they came, and cites the ticket that owns the gap, so the
-    # width and project/ rules do not apply to it. Its links still must resolve.
-    review = str(path).endswith(".review.md")
     here = Path(path).resolve()
     for n, k, raw in lines:
         if k in ("code", "fence"):
-            if k == "code" and not review and len(raw.rstrip()) > WIDTH:
+            if k == "code" and len(raw.rstrip()) > WIDTH:
                 hit(n, "D015", f"example line is {len(raw.rstrip())} characters; break it to {WIDTH} or fewer")
             continue
         bare = re.sub(r"`[^`]*`", "", raw)
@@ -323,14 +327,15 @@ def lint(path):
             if dest is None:
                 hit(n, "D040", f"link to a file that does not exist: {target}")
                 continue
-            if not review and str(dest).startswith(PROJECT + os.sep):
+            if str(dest).startswith(PROJECT + os.sep):
                 hit(n, "D042", f"links into project/: {target}")
             if frag and dest.suffix == ".md" and frag not in anchors(dest.read_text()):
                 hit(n, "D041", f"no heading on {dest.name} for #{frag}")
-        if not review:
-            for ticket in sorted(set(re.findall(TICKET, bare))):
-                hit(n, "D042", f"names {ticket}; docs never send a reader into project/")
+        for ticket in sorted(set(re.findall(TICKET, bare))):
+            hit(n, "D042", f"names {ticket}; docs never send a reader into project/")
 
+    if str(path).endswith(".review.md"):
+        found = [f for f in found if f[1] not in REVIEW_EXEMPT]
     return sorted(set(found))
 
 def stats(paths):

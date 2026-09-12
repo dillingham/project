@@ -45,49 +45,61 @@ repo
 echo staged > "$R/a.txt"
 git -C "$R" add a.txt
 echo unstaged > "$R/a.txt"
+echo untracked > "$R/new.txt"
 touch "$TEMP/a file $passed"
 run "$TEMP/a file $passed/worktrees" todo-x --take && fail 'an uncreatable worktrees folder did not abort'
 [ "$(git -C "$R" show :a.txt)" = staged ] || fail 'the staged version was lost from the index'
 [ "$(cat "$R/a.txt")" = unstaged ] || fail 'the unstaged version was lost'
+[ "$(cat "$R/new.txt")" = untracked ] || fail 'the untracked file was lost'
 [ -z "$(git -C "$R" stash list)" ] || fail 'the stash was left behind'
-ok 'a failed --take puts staged and unstaged changes back exactly as they were'
+[ -z "$(git -C "$R" for-each-ref refs/take)" ] || fail 'the ref holding the changes was left behind'
+ok 'a failed --take puts staged, unstaged and untracked changes back exactly as they were'
 
 repo
 echo staged > "$R/a.txt"
 git -C "$R" add a.txt
 echo unstaged > "$R/a.txt"
+echo untracked > "$R/new.txt"
 run "$TEMP/worktrees $passed" todo-x --take || fail '--take did not open a worktree'
 D="$TEMP/worktrees $passed/repo-$passed-todo-x"
 [ "$(git -C "$D" show :a.txt)" = staged ] || fail 'the staged version did not arrive staged'
 [ "$(cat "$D/a.txt")" = unstaged ] || fail 'the unstaged version did not arrive'
+[ "$(cat "$D/new.txt")" = untracked ] || fail 'the untracked file did not arrive'
 [ -z "$(git -C "$R" status --porcelain)" ] || fail 'the default branch was not left clean'
-ok '--take moves staged and unstaged changes exactly as they were'
+ok '--take moves staged, unstaged and untracked changes exactly as they were'
 
 repo
 git -C "$R" worktree add -q "$TEMP/other $passed" -b other
-echo theirs > "$TEMP/other $passed/a.txt"
 echo mine > "$R/a.txt"
+echo untracked > "$R/new.txt"
 REAL_GIT=$(command -v git)
 mkdir -p "$TEMP/bin $passed"
-# git as usual, except that the moment --take has pushed its stash, another
-# worktree of the same repository pushes one of its own on top of it
+# git as usual, except that it logs every command reading or writing the
+# stash stack, and at each step of the move another worktree pushes a stash
 cat > "$TEMP/bin $passed/git" <<SH
 #!/usr/bin/env bash
 "$REAL_GIT" "\$@"; status=\$?
-if [ "\${3:-}" = stash ] && [ "\${4:-}" = push ] && [ ! -e "$TEMP/competed $passed" ]; then
-  touch "$TEMP/competed $passed"
-  "$REAL_GIT" -C "$TEMP/other $passed" stash push -q -m competitor
-fi
+case " \$* " in
+  *" stash create "*|*" stash apply "*) ;;
+  *" stash "*) echo "\$*" >> "$TEMP/stack $passed" ;;
+esac
+case " \$* " in *" stash create "*|*" worktree add "*|*" stash apply "*)
+  echo "competitor \$\$" > "$TEMP/other $passed/a.txt"
+  "$REAL_GIT" -C "$TEMP/other $passed" stash push -q -m competitor ;;
+esac
 exit \$status
 SH
 chmod +x "$TEMP/bin $passed/git"
 (cd "$R" && PATH="$TEMP/bin $passed:$PATH" PROJECT_WORKTREES="$TEMP/worktrees $passed" bash "$SCRIPT" todo-x --take) > "$TEMP/output" 2>&1 \
-  || fail '--take failed when another stash landed mid-way'
-[ -e "$TEMP/competed $passed" ] || fail 'the competing stash was never pushed, so this proved nothing'
-[ "$(cat "$TEMP/worktrees $passed/repo-$passed-todo-x/a.txt")" = mine ] || fail 'the worktree got something other than the changes it was asked to move'
-git -C "$R" stash list | grep -q competitor || fail "the other worktree's stash was taken"
-[ "$(git -C "$R" stash list | wc -l | tr -d ' ')" = 1 ] || fail 'the stash --take pushed was left behind'
-ok 'a stash pushed by another worktree mid-take is neither moved nor mistaken for ours'
+  || fail '--take failed while another worktree pushed stashes'
+[ ! -e "$TEMP/stack $passed" ] || fail "--take read or wrote the shared stash stack: $(cat "$TEMP/stack $passed")"
+D="$TEMP/worktrees $passed/repo-$passed-todo-x"
+[ "$(cat "$D/a.txt")" = mine ] && [ "$(cat "$D/new.txt")" = untracked ] || fail 'the worktree did not get the changes, untracked file included'
+[ "$(git -C "$R" stash list | wc -l | tr -d ' ')" = 3 ] && [ "$(git -C "$R" stash list --format=%gs | sort -u)" = 'On other: competitor' ] \
+  || fail "the other worktree's stashes did not all survive: $(git -C "$R" stash list)"
+[ -z "$(git -C "$R" status --porcelain)" ] || fail 'the default branch was not left clean'
+[ -z "$(git -C "$R" for-each-ref refs/take)" ] || fail 'the ref holding the changes was left behind'
+ok '--take never touches the shared stash stack, so stashes other worktrees push mid-move all survive'
 
 repo
 P="$(cd "$(dirname "$SCRIPT")/../cli" && pwd)/project.sh"

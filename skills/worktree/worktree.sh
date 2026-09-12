@@ -39,21 +39,49 @@ folder=$(printf '%s-%s' "$reponame" "${n%%+*}" | tr '[:upper:]' '[:lower:]' | tr
 folder=${folder%-}
 [ "${#folder}" -le 63 ] || { echo "folder name $folder is ${#folder} characters; a hostname label caps at 63 - pick a shorter id" >&2; exit 1; }
 
-# stash is one stack shared by the whole repo, not per-worktree, so a
-# concurrent `git stash` anywhere else can move what "top of stack" means
-# between our push and our pop. Apply by the sha the push handed us
-# (content-addressed, survives being buried) and drop only the matching
-# entry - never a blind pop, which would risk taking someone else's stash.
-# --index, so a file staged one way and edited another comes back both ways.
-unstash() { git -C "$1" stash apply --index "$2" \
-  && git -C "$1" stash drop "$(git -C "$1" stash list --format='%H %gd' | awk -v s="$2" '$1==s{print $2; exit}')"; }
+# --take never puts the changes on the stash stack. That stack is shared by
+# every worktree of the repo, and git drops an entry only by its position,
+# which another worktree's push can change between reading it and dropping
+# it. So it builds the commit `git stash -u` would - index, worktree and
+# untracked files - without storing it, and holds it under a ref of its own,
+# so a crash leaves the changes findable and gc leaves them alone. `git stash
+# apply --index` takes that commit like any stash, staged and unstaged apart.
+carry=""
+held="refs/take/$folder"
+take_changes() {
+  local head work index tree untracked scratch
+  head=$(git -C "$mainpath" rev-parse HEAD)
+  work=$(git -C "$mainpath" stash create "relocating to $n") || return 1
+  if [ -z "$work" ]; then
+    # untracked files only: the index and the worktree are both HEAD's
+    index=$(git -C "$mainpath" commit-tree "$head^{tree}" -p "$head" -m "index on $base") || return 1
+    work=$(git -C "$mainpath" commit-tree "$head^{tree}" -p "$head" -p "$index" -m "relocating to $n") || return 1
+  fi
+  if [ -n "$(git -C "$mainpath" ls-files --others --exclude-standard)" ]; then
+    scratch=$(mktemp); rm -f "$scratch"
+    tree=$(git -C "$mainpath" ls-files -z --others --exclude-standard \
+      | GIT_INDEX_FILE="$scratch" git -C "$mainpath" update-index --add -z --stdin \
+      && GIT_INDEX_FILE="$scratch" git -C "$mainpath" write-tree) || { rm -f "$scratch"; return 1; }
+    rm -f "$scratch"
+    untracked=$(git -C "$mainpath" commit-tree "$tree" -m "untracked files on $base") || return 1
+    work=$(git -C "$mainpath" commit-tree "$work^{tree}" -p "$head" -p "$work^2" -p "$untracked" -m "relocating to $n") || return 1
+  fi
+  git -C "$mainpath" update-ref "$held" "$work" || return 1
+  carry=$work
+  git -C "$mainpath" reset -q --hard && git -C "$mainpath" clean -fdq
+}
 
 # Until the worktree exists, ANY exit - an abort below, or a command failing
-# under set -e - puts a stash we took back on the default branch, so a failed
-# step never strands its changes on the stash stack. Dropped once the worktree
-# is real, since from then on the stash belongs to the worktree.
-stashed=""
-restore() { [ -z "$stashed" ] || unstash "$mainpath" "$stashed" || echo "could not restore $stashed - it is still in git stash list" >&2; stashed=""; }
+# under set -e - puts the changes back on the default branch.
+restore() {
+  [ -n "$carry" ] || return 0
+  if git -C "$mainpath" stash apply --index "$carry" > /dev/null; then
+    git -C "$mainpath" update-ref -d "$held"
+  else
+    echo "could not put the changes back - they are kept as $held: git stash apply --index $held" >&2
+  fi
+  carry=""
+}
 trap restore EXIT
 abort() { echo "$1" >&2; exit 1; }
 
@@ -65,13 +93,9 @@ dest="$WORKTREES/$folder"
 dirty=$(git -C "$mainpath" status --porcelain)
 if [ -n "$dirty" ]; then
   if [ -n "$take" ]; then
-    # Found again by a message nobody else can have written, never as the top
-    # of the stack: another worktree can push its own stash between ours and
-    # the lookup, and taking the top would move their changes, not these.
-    tag="relocating to $n ($$-$(date +%s))"
-    git -C "$mainpath" stash push -u -m "$tag" >&2 || abort "stash failed, aborting"
-    stashed=$(git -C "$mainpath" stash list --format='%H %gs' | awk -v t="$tag" 'index($0, t) { print $1; exit }')
-    [ -n "$stashed" ] || abort "stashed, but cannot find it again - it is in git stash list as '$tag'"
+    git -C "$mainpath" show-ref --verify --quiet "$held" \
+      && abort "$held already holds changes from an earlier --take - git stash apply --index $held, then git update-ref -d $held"
+    take_changes || abort "could not set the changes aside, aborting"
   else
     echo "$base is not clean, aborting:" >&2
     echo "$dirty" >&2
@@ -99,12 +123,12 @@ command -v herd >/dev/null 2>&1 && url="http://$folder.test"
 # already committed to, so nothing below unwinds it, and abort() is never
 # called again from here down.
 conflict=""
-if [ -n "$stashed" ]; then
-  if unstash "$dest" "$stashed"; then
-    stashed=""
+if [ -n "$carry" ]; then
+  if git -C "$dest" stash apply --index "$carry" >&2; then
+    git -C "$mainpath" update-ref -d "$held"
   else
     conflict=1
-    echo "stash pop conflicted - resolve inside $dest (git stash list still has it)" >&2
+    echo "applying the changes conflicted - resolve inside $dest (they are also kept as $held)" >&2
   fi
 fi
 
@@ -153,7 +177,7 @@ setup() (
 
 setup_failed=""
 if [ -n "$conflict" ]; then
-  echo "skipping automated setup because of the stash conflict above - resolve it, then finish setup by hand inside $dest" >&2
+  echo "skipping automated setup because of the conflict above - resolve it, then finish setup by hand inside $dest" >&2
   setup_failed=1
 else
   setup || setup_failed=1

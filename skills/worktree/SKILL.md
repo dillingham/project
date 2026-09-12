@@ -48,7 +48,7 @@ Before any of that runs, the script also unsets every key `.env.example` declare
 
 If any step fails, the script says exactly which one - not one generic "setup failed" - and still prints the worktree's path first, because the worktree itself already exists and is worth having even when setup did not finish. Finish the failed step by hand inside that path; everything before it already succeeded and does not need repeating.
 
-A stash-pop conflict (see `--take` below) skips the automated setup entirely rather than running installs and migrations over files that may still carry conflict markers - resolve the conflict first, then run the setup steps by hand.
+A conflict applying moved changes (see `--take` below) skips the automated setup entirely rather than running installs and migrations over files that may still carry conflict markers - resolve the conflict first, then run the setup steps by hand.
 
 ## Claiming needs nothing extra
 
@@ -56,7 +56,7 @@ The worktree itself is the claim - see [chat](../chat/SKILL.md) for how `CLAIMED
 
 ## Moving dirty work off the default branch
 
-"move my current changes on main into their own worktree", "this should have been a branch" means `$W <id> --take`: it stashes whatever is dirty, runs the same guarded sequence as a plain call, then applies the stash inside the new worktree - the default branch ends clean, the worktree carries the work. `<id>` here is just a name: ask for one, or use whatever was already given - never infer it from the diff or the ticket files.
+"move my current changes on main into their own worktree", "this should have been a branch" means `$W <id> --take`: it sets aside whatever is dirty - staged, unstaged and untracked, each kept as it was - runs the same guarded sequence as a plain call, then applies it inside the new worktree. The default branch ends clean, the worktree carries the work. It never uses the stash stack, which every worktree of the repo shares: the changes wait under `refs/take/<folder>` until they land, and that ref is where to find them if anything stops halfway. `<id>` here is just a name: ask for one, or use whatever was already given - never infer it from the diff or the ticket files.
 
 ## Joining tickets on one branch
 
