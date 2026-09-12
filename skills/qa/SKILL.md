@@ -144,7 +144,7 @@ For Pest's browser plugin, the selectors, assertions and traps are in [reference
 
 ### 5. File it
 
-The bug goes on the board through `/project:ask` as an `issue-` (or `todo-` if it is being scheduled).
+The bug goes on the board through `/project:chat` as an `issue-` (or `todo-` if it is being scheduled).
 
 **The ticket carries the failing test: its path, and its actual output pasted verbatim.** Run it, copy what it printed, do not paraphrase it. That output is the most compressed statement of the bug anyone will ever write - `expected '/teams', got '/people'` says in one line what a paragraph of prose says badly - and it is what lets a reader who will never run the test understand the defect. A ticket that only names a path asks them to go and get it, which they will not.
 

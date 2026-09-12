@@ -1,6 +1,6 @@
 ---
-name: ask
-description: "Use for any question about what to work on next, what is open, what is stale, or what belongs to a feature - and for filing, finding or moving work in project/ - capturing an idea or aside the user drops mid-task, recording a finding you are not fixing now, promoting a spike into committed work, closing something as done, rejecting it, or answering what is open. Every file in project/ is {status}-{name}.md and the status is the first word, so changing status is a rename. Files ACCRETE sections (## Idea, ## Spike, ## Todo, ## Done) rather than being rewritten. Also covers where a thing belongs: project/spec-* for design, project/ for work, docs/ for user-facing. Invoked as /project:ask with a question, it runs the bundled project.sh and answers directly. The board ranks by priority and bumps anything idle past 30 days."
+name: chat
+description: "Use for any question about what to work on next, what is open, what is stale, or what belongs to a feature - and for filing, finding or moving work in project/ - capturing an idea or aside the user drops mid-task, recording a finding you are not fixing now, promoting a spike into committed work, closing something as done, rejecting it, or answering what is open. Every file in project/ is {status}-{name}.md and the status is the first word, so changing status is a rename. Files ACCRETE sections (## Idea, ## Spike, ## Todo, ## Done) rather than being rewritten. Also covers where a thing belongs: project/spec-* for design, project/ for work, docs/ for user-facing. Invoked as /project:chat with a question, it runs the bundled project.sh and answers directly. The board ranks by priority and bumps anything idle past 30 days."
 ---
 
 # project/
@@ -9,7 +9,7 @@ description: "Use for any question about what to work on next, what is open, wha
 
 ## When invoked directly
 
-`/project:ask <question>` means: **run the script, read the answer, reply.** Do not open files first, and do not ask which command to run.
+`/project:chat <question>` means: **run the script, read the answer, reply.** Do not open files first, and do not ask which command to run.
 
 ```
 P="${CLAUDE_SKILL_DIR}/../cli/project.sh"
@@ -83,7 +83,7 @@ Starting work on a ticket is never just editing files in place - it is always th
 
 ## Spiking a subject
 
-`/project:ask lets spike forms` is not a board query. It means: **read everything the repo already knows about that subject, work out what is genuinely undecided, and ask - one decision at a time, with selectable options.** The output is a `spike-` file that accretes answers as they are given.
+`/project:chat lets spike forms` is not a board query. It means: **read everything the repo already knows about that subject, work out what is genuinely undecided, and ask - one decision at a time, with selectable options.** The output is a `spike-` file that accretes answers as they are given.
 
 Do not open with prose. Do not present a survey and ask what they think. Ask.
 

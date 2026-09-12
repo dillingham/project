@@ -1,6 +1,6 @@
 ---
 name: worktree
-description: "Use to START work on a ticket, idea, or any ask that means editing code - never edit in place on the default branch. Triggers: /project:ask has just decided what to work on, 'yes' to being offered a ticket, 'let's start on X', 'spin up a worktree for X', or 'this should have been a branch' / 'move my changes off main'. Runs the bundled worktree.sh: creates a fresh git worktree off the default branch at ~/Worktrees/<repo>-<id>, then sets it up for whatever the repo uses - composer install, .env, key:generate, migrate --seed, npm/pnpm/yarn/bun install and build - before returning, so the path it prints is genuinely ready to work in. Invoke this every single time work starts, even mid-conversation - do not just describe it in prose and move on."
+description: "Use to START work on a ticket, idea, or any ask that means editing code - never edit in place on the default branch. Triggers: /project:chat has just decided what to work on, 'yes' to being offered a ticket, 'let's start on X', 'spin up a worktree for X', or 'this should have been a branch' / 'move my changes off main'. Runs the bundled worktree.sh: creates a fresh git worktree off the default branch at ~/Worktrees/<repo>-<id>, then sets it up for whatever the repo uses - composer install, .env, key:generate, migrate --seed, npm/pnpm/yarn/bun install and build - before returning, so the path it prints is genuinely ready to work in. Invoke this every single time work starts, even mid-conversation - do not just describe it in prose and move on."
 argument-hint: "<id> [--take]"
 ---
 
@@ -52,7 +52,7 @@ A stash-pop conflict (see `--take` below) skips the automated setup entirely rat
 
 ## Claiming needs nothing extra
 
-The worktree itself is the claim - see [ask](../ask/SKILL.md) for how `CLAIMED` and `project.sh claimed` read that back from `git worktree list`. This skill only creates the worktree; it does not touch the board.
+The worktree itself is the claim - see [chat](../chat/SKILL.md) for how `CLAIMED` and `project.sh claimed` read that back from `git worktree list`. This skill only creates the worktree; it does not touch the board.
 
 ## Moving dirty work off the default branch
 

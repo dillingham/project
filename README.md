@@ -13,7 +13,7 @@ Updates arrive with `/plugin marketplace update dillingham`.
 
 | Skill | Does |
 | --- | --- |
-| `/project:ask <question>` | answers anything about the work - what's next, what's open, file this, close that, let's spike X |
+| `/project:chat <question>` | answers anything about the work - what's next, what's open, file this, close that, let's spike X |
 | `/project:cli [command]` | runs the board script and prints its raw output; no arguments prints the menu |
 | `/project:worktree <id>` | starts work on a ticket in a fresh, fully set up git worktree |
 | `/project:docs [spec or page]` | writes, revises or lints the pages in `docs/` |
@@ -70,9 +70,9 @@ Two more that are not work items:
 ### Asking about it
 
 ```
-/project:ask what's next?
-/project:ask what's open?
-/project:ask anything about scoping?
+/project:chat what's next?
+/project:chat what's open?
+/project:chat anything about scoping?
 ```
 
 Behind it is `project.sh`, which reads the folder and answers in one pass. `/project:cli` runs it directly:
@@ -170,4 +170,4 @@ A ticket is claimed by the worktree `/project:worktree` opens for it - its branc
 
 ## Changing it
 
-[skills/ask/SKILL.md](skills/ask/SKILL.md) is the operating manual an agent reads. [skills/ask/decisions.md](skills/ask/decisions.md) is why each of these is shaped the way it is, and which obvious alternatives were tried and rejected - read that one before changing how any of this works. `bash skills/cli/project.test.sh` exercises the move command in throwaway repositories.
+[skills/chat/SKILL.md](skills/chat/SKILL.md) is the operating manual an agent reads. [skills/chat/decisions.md](skills/chat/decisions.md) is why each of these is shaped the way it is, and which obvious alternatives were tried and rejected - read that one before changing how any of this works. `bash skills/cli/project.test.sh` exercises the move command in throwaway repositories.
