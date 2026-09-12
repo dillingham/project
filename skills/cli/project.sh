@@ -62,15 +62,20 @@ USAGE
 
 # one stat + one git + one awk, rather than two forks per file
 rows() {
-  local statf gitf
-  statf=$(mktemp); gitf=$(mktemp)
-  trap 'rm -f "$statf" "$gitf"' RETURN
+  local statf gitf lsf blockf branchf
+  statf=$(mktemp); gitf=$(mktemp); lsf=$(mktemp); blockf=$(mktemp); branchf=$(mktemp)
+  trap 'rm -f "$statf" "$gitf" "$lsf" "$blockf" "$branchf"' RETURN
   stat -f '%N|%m|%B' "$DIR"/*.md 2>/dev/null > "$statf" \
     || stat -c '%n|%Y|%W' "$DIR"/*.md 2>/dev/null > "$statf"
   # commit epoch followed by the paths it touched; empty when nothing is tracked
   git -C "$DIR/.." log --format='@%at' --name-only -- project 2>/dev/null > "$gitf" || true
+  # gathered here, quoted, rather than as shell commands inside awk, where a
+  # path with a space in it splits into two arguments
+  ls "$DIR" > "$lsf" 2>/dev/null || true
+  grep -H "^Blocked: " "$DIR"/*.md > "$blockf" 2>/dev/null || true
+  git -C "$DIR/.." worktree list --porcelain 2>/dev/null | grep "^branch " > "$branchf" || true
 
-  awk -F'|' -v main="$MAIN" -v now="$NOW" -v stale="$STALE_DAYS" -v gitf="$gitf" -v dir="$DIR" -v statuses="$STATUSES" -v tzoff="$TZ_OFFSET" '
+  awk -F'|' -v main="$MAIN" -v now="$NOW" -v stale="$STALE_DAYS" -v gitf="$gitf" -v lsf="$lsf" -v blockf="$blockf" -v branchf="$branchf" -v statuses="$STATUSES" -v tzoff="$TZ_OFFSET" '
     # civil-from-days, because this awk has no strftime
     function stamp(t,   z, era, doe, yoe, y, doy, mp, d, m, secs) {
       t = t + tzoff
@@ -91,28 +96,25 @@ rows() {
     BEGIN {
       OFS="\037"
       # every ticket that exists, and the reverse index of Blocked: lines
-      while (("ls " dir | getline f) > 0) { sub(/\.md$/, "", f); exists[f] = 1 }
-      close("ls " dir)
-      while (("grep -H \"^Blocked: \" " dir "/*.md 2>/dev/null" | getline g) > 0) {
+      while ((getline f < lsf) > 0) { sub(/\.md$/, "", f); exists[f] = 1 }
+      while ((getline g < blockf) > 0) {
         split(g, gp, ":Blocked: ")
         n = split(gp[1], pp, "/"); who = pp[n]; sub(/\.md$/, "", who)
         on = gp[2]; sub(/ .*/, "", on); sub(/\.md$/, "", on)
         blocks[on] = blocks[on] + 1
       }
-      close("grep -H \"^Blocked: \" " dir "/*.md 2>/dev/null")
 
       # a ticket with a live worktree of its own name is claimed - no header
       # to write or commit, git worktree list is already shared and instant.
       # related tickets sharing one branch join their ids with +, so a
       # branch claims every id it names, not just the whole string
-      while (("git -C " dir "/.. worktree list --porcelain 2>/dev/null | grep \"^branch \"" | getline wl) > 0) {
+      while ((getline wl < branchf) > 0) {
         b = wl; sub(/^branch refs\/heads\//, "", b)
         if (b != main) {
           wn = split(b, wp, "+")
           for (wi = 1; wi <= wn; wi++) { claimed[wp[wi]] = 1 }
         }
       }
-      close("git -C " dir "/.. worktree list --porcelain 2>/dev/null | grep \"^branch \"")
 
       while ((getline l < gitf) > 0) {
         if (l ~ /^@/) { t = substr(l,2)+0; continue }
@@ -321,8 +323,10 @@ case "$cmd" in
     usage; [ -z "$cmd" ] && [ -d "$DIR" ] && { echo; rows | open_only | awk -F'\037' '$1<=1' | emit; } || true ;;
   next)
     rows | open_only | awk -F'\037' '$1<=1 && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | emit
-    # one untriaged item alongside the work: triage before you start
-    rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | head -1 | emit ;;
+    # one untriaged item alongside the work: triage before you start. The
+    # filter reads to the end rather than head -1 closing the pipe, which
+    # under pipefail turns a long queue into a SIGPIPE exit
+    rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/ && !n++' | emit ;;
   groom) rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | emit ;;
   blocked)
     # the reason lives in the header, and the reason is the point
@@ -372,7 +376,8 @@ case "$cmd" in
     mkdir -p "$DIR"
     f="$DIR/$s-$n.md"; [ -e "$f" ] && { echo "$f exists" >&2; exit 1; }
     S=$(echo "$s" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$s" | cut -c2-)
-    printf '# %s\n\nPriority: medium\n\n## %s\n\n' "$(echo "$n" | tr '-' ' ')" "$S" > "$f"
+    # untriaged until someone with standing judges it - see groom in chat's SKILL.md
+    printf '# %s\n\nPriority: groom\n\n## %s\n\n' "$(echo "$n" | tr '-' ' ')" "$S" > "$f"
     echo "$f" ;;
   move|mv)
     [ "$#" -ge 3 ] && [ "$#" -le 4 ] || { echo "usage: project.sh move <status> <filename> [--dry-run]" >&2; exit 1; }
@@ -404,9 +409,13 @@ def prose(text):
             yield n, re.sub(r"`[^`]*`", "", line)
 
 def anchors(text):
-    """GitHub's heading slugs, approximated the way the Pest check did."""
-    return {re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", h).lower())).strip("-")
-            for h in re.findall(r"^#{1,6} (.+)$", text, re.M)}
+    """GitHub's heading slugs, approximated the way the Pest check did. A repeated heading gets -1, -2, as GitHub numbers it."""
+    seen, ids = {}, set()
+    for h in re.findall(r"^#{1,6} (.+)$", text, re.M):
+        slug = re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", h).lower())).strip("-")
+        ids.add(f"{slug}-{seen[slug]}" if slug in seen else slug)
+        seen[slug] = seen.get(slug, 0) + 1
+    return ids
 
 def resolve(src, page):
     base = src.parent / page

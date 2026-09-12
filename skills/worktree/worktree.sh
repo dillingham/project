@@ -47,10 +47,14 @@ folder=${folder%-}
 unstash() { git -C "$1" stash apply "$2" \
   && git -C "$1" stash drop "$(git -C "$1" stash list --format='%H %gd' | awk -v s="$2" '$1==s{print $2; exit}')"; }
 
-# abort() undoes the stash (if we took one) before leaving, so a failed
-# later step never strands the default branch's own changes on the stash stack
+# Until the worktree exists, ANY exit - an abort below, or a command failing
+# under set -e - puts a stash we took back on the default branch, so a failed
+# step never strands its changes on the stash stack. Dropped once the worktree
+# is real, since from then on the stash belongs to the worktree.
 stashed=""
-abort() { echo "$1" >&2; [ -n "$stashed" ] && unstash "$mainpath" "$stashed"; exit 1; }
+restore() { [ -z "$stashed" ] || unstash "$mainpath" "$stashed" || echo "could not restore $stashed - it is still in git stash list" >&2; stashed=""; }
+trap restore EXIT
+abort() { echo "$1" >&2; exit 1; }
 
 git -C "$mainpath" show-ref --verify --quiet "refs/heads/$n" \
   && abort "branch $n already exists, aborting - resume there or pick a different id"
@@ -76,8 +80,9 @@ if git -C "$mainpath" remote get-url origin >/dev/null 2>&1; then
     || abort "$base has diverged from origin/$base, aborting - resolve manually"
 fi
 
-mkdir -p "$WORKTREES"
+mkdir -p "$WORKTREES" || abort "cannot create $WORKTREES, aborting"
 git -C "$mainpath" worktree add "$dest" -b "$n" "$base" || abort "worktree add failed, aborting"
+trap - EXIT
 
 # Herd serves every folder directly under a parked path as <folder>.test, so
 # there is no server to start. Without Herd there is no URL to promise.
@@ -85,8 +90,8 @@ url=""
 command -v herd >/dev/null 2>&1 && url="http://$folder.test"
 
 # past this point the worktree is real and staying - the git state is
-# already committed to, so nothing below unwinds it. abort() (which would
-# re-touch the stash) is never called again from here down.
+# already committed to, so nothing below unwinds it, and abort() is never
+# called again from here down.
 conflict=""
 if [ -n "$stashed" ]; then
   if unstash "$dest" "$stashed"; then

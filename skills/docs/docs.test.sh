@@ -47,3 +47,9 @@ expect 'docs/page.review.md:7: D040'
 refuse 'docs/page.review.md:7: D042'
 refuse 'docs/page.review.md:13: D015'
 echo 'PASS: links, anchors, the project/ boundary and example width, with review sidecars exempt from the last two'
+
+printf '# Dup\n\n## Introduction\n\n## Usage\n\n## Usage\n\nSee [one](#usage), [two](#usage-1) and [three](#usage-2).\n' > "$TEMP/docs/dup.md"
+out=$(cd "$TEMP" && bash "$SCRIPT" lint dup.md || true)
+expect 'docs/dup.md:9: D041  no heading on dup.md for #usage-2'
+refuse '#usage-1'
+echo 'PASS: a repeated heading is reachable at its numbered anchor, and only that far' 

@@ -179,4 +179,40 @@ rm "$FIXTURE/project/todo-example.md"
 if run check; then echo 'FAIL: check passed an empty board' >&2; exit 1; fi
 ok 'an empty board fails the check rather than passing unread'
 
+fixture
+printf '# Blocker\n\nPriority: high\n' > "$FIXTURE/project/todo-blocker.md"
+printf '# Waits\n\nPriority: high\nBlocked: todo-blocker.md - needs it first\n' > "$FIXTURE/project/todo-waits.md"
+printf '# Taken\n\nPriority: high\n' > "$FIXTURE/project/todo-taken.md"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b todo-taken
+run blocked
+contains "$TEMP/output" 'BLOCKED'
+if grep -q 'UNBLOCKED' "$TEMP/output"; then echo 'FAIL: a live blocker read as lifted' >&2; cat "$TEMP/output" >&2; exit 1; fi
+run next
+contains "$TEMP/output" 'todo-blocker'
+if grep -q 'todo-taken' "$TEMP/output"; then echo 'FAIL: next offered a claimed ticket' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'claims and blockers read correctly from a repository path with spaces'
+
+fixture
+for i in $(seq 1500); do printf '# Groom %s\n\nPriority: groom\n' "$i" > "$FIXTURE/project/idea-groom-$i.md"; done
+run next || { echo "FAIL: next exited non-zero on a large grooming queue" >&2; exit 1; }
+[ "$(grep -c 'groom' "$TEMP/output")" = 1 ] || { echo 'FAIL: next should offer exactly one ticket to triage' >&2; exit 1; }
+ok 'next offers one ticket to triage and exits cleanly however long the queue'
+
+fixture
+run new idea untriaged-thing
+contains "$FIXTURE/project/idea-untriaged-thing.md" 'Priority: groom'
+run groom
+contains "$TEMP/output" 'idea-untriaged-thing'
+ok 'a new ticket is untriaged until someone judges it'
+
+fixture
+printf '# Page\n\n## Usage\n\n## Usage\n' > "$FIXTURE/project/spec-dup.md"
+printf '# A ticket\n\nPriority: low\n\n## Todo\n\n[one](spec-dup.md#usage) [two](spec-dup.md#usage-1) [three](spec-dup.md#usage-2)\n' > "$FIXTURE/project/todo-example.md"
+if run check; then echo 'FAIL: check passed a link to a third Usage' >&2; exit 1; fi
+contains "$TEMP/output" 'no heading on spec-dup.md for #usage-2'
+[ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: check rejected a valid duplicate-heading anchor' >&2; cat "$TEMP/output" >&2; exit 1; }
+ok 'a repeated heading is reachable at its numbered anchor'
+
 printf '%s scenarios passed.\n' "$passed"

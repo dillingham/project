@@ -133,6 +133,15 @@ def parse(text):
         out.append((n, k, raw))
     return out
 
+def anchors(text):
+    """Every id a page's headings get. A repeated heading is numbered -1, -2, as GitHub numbers it."""
+    seen, ids = {}, set()
+    for _, _, t in headings(parse(text)):
+        s = slug(t)
+        ids.add(f"{s}-{seen[s]}" if s in seen else s)
+        seen[s] = seen.get(s, 0) + 1
+    return ids
+
 def headings(lines):
     return [(n, len(m.group(1)), m.group(2).strip())
             for n, k, raw in lines if k == "head"
@@ -307,7 +316,7 @@ def lint(path):
                 continue
             if not review and str(dest).startswith(PROJECT + os.sep):
                 hit(n, "D042", f"links into project/: {target}")
-            if frag and dest.suffix == ".md" and frag not in {slug(t) for _, _, t in headings(parse(dest.read_text()))}:
+            if frag and dest.suffix == ".md" and frag not in anchors(dest.read_text()):
                 hit(n, "D041", f"no heading on {dest.name} for #{frag}")
         if not review:
             for ticket in sorted(set(re.findall(TICKET, bare))):
