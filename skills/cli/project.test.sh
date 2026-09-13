@@ -333,11 +333,15 @@ printf '# Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-widget.md"
 printf '# Todo Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-todo-widget.md"
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
-git -C "$FIXTURE" worktree add -q "$TEMP/first $passed" -b widget
-git -C "$FIXTURE" worktree add -q "$TEMP/second $passed" -b todo-widget
+# git worktree list --porcelain sorts by PATH, not by creation order, so the
+# colliding branch's folder is named to sort FIRST - a whole-string fallback
+# would then match it before ever reaching the correct one; a fix that only
+# works because the correct branch happened to sort first would pass either way
+git -C "$FIXTURE" worktree add -q "$TEMP/aaa-collides $passed" -b todo-widget
+git -C "$FIXTURE" worktree add -q "$TEMP/zzz-correct $passed" -b widget
 run resume todo-widget
-contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$TEMP/first $passed" rev-parse --show-toplevel)")"
-if grep -q "second $passed" "$TEMP/output"; then echo 'FAIL: resume matched the wrong tickets branch' >&2; cat "$TEMP/output" >&2; exit 1; fi
+contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$TEMP/zzz-correct $passed" rev-parse --show-toplevel)")"
+if grep -q "aaa-collides $passed" "$TEMP/output"; then echo 'FAIL: resume matched the wrong tickets branch' >&2; cat "$TEMP/output" >&2; exit 1; fi
 ok 'resume matches a ticket id to its own branch, not to another ticket whose raw id equals it'
 
 fixture
@@ -384,5 +388,45 @@ rm -rf "$FIXTURE/project"
 run trail todo-gone-ticket
 contains "$TEMP/output" 'Ship it'
 ok 'trail works even after project/ itself is gone'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship alpha and beta together
+
+Branch: alpha+beta
+MSG
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" api "*"/pulls"*) echo "42	Ship alpha and beta together	https://example.com/pr/42" ;;
+  *" pr "*" list "*) echo "[]" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TEMP/bin $passed/gh"
+# querying by beta, the SECOND part of the joined branch - a head:beta
+# search would never find alpha+beta, since head: is a prefix search
+PATH="$TEMP/bin $passed:$PATH" run trail todo-beta
+contains "$TEMP/output" 'Ship alpha and beta together'
+ok 'trail finds a joined branchs pr by the commit it found, regardless of which of its tickets was queried'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship a and b separately
+
+Branch: a
+Branch: b
+MSG
+run trail todo-a
+contains "$TEMP/output" 'Ship a and b separately'
+run trail todo-b
+contains "$TEMP/output" 'Ship a and b separately'
+ok 'trail finds a commit carrying two separate Branch trailer lines, for either ticket'
 
 printf '%s scenarios passed.\n' "$passed"

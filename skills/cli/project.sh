@@ -508,7 +508,11 @@ case "$cmd" in
     # being long gone. A query part is matched as a whole +-joined token of
     # the trailer value, never a substring and never required to be alone in
     # it, so a single id also finds the commit for a joined worktree it
-    # shares a branch with, in either order.
+    # shares a branch with, in either order. The trailer itself may also
+    # repeat - git folds two separate Branch: lines into one comma-joined
+    # value here - so each occurrence is split on the comma before its own
+    # +-joined names are split out, rather than treating the whole thing as
+    # one token none of them will ever equal.
     n="${2:?usage: project.sh trail <id>}"
     IFS='+' read -ra qparts <<< "$n"
     stables=()
@@ -519,7 +523,8 @@ case "$cmd" in
           | awk -F'\t' -v want="$joined" '
               BEGIN { n = split(want, req, "+"); for (i = 1; i <= n; i++) needed[req[i]] = 1 }
               {
-                m = split($4, have, "+"); for (i = 1; i <= m; i++) got[have[i]] = 1
+                vn = split($4, values, ",")
+                for (v = 1; v <= vn; v++) { m = split(values[v], have, "+"); for (i = 1; i <= m; i++) got[have[i]] = 1 }
                 ok = 1; for (k in needed) if (!(k in got)) ok = 0
                 if (ok) print $1"\t"$2"\t"$3
                 delete got
@@ -530,21 +535,39 @@ case "$cmd" in
     elif ! git -C "$ROOT" remote get-url origin >/dev/null 2>&1; then
       echo "pr	unavailable: no origin remote"
     else
-      # head:<name> matches loosely (GitHub tokenizes the branch name, so
-      # head:slugify also surfaces slugify-followup) - the search only seeds
-      # candidates, and every one is re-checked below against its real
-      # headRefName before being reported as this ticket's PR
-      ghout=$(gh pr list --search "head:${stables[0]}" --state all --json number,title,url,headRefName 2>&1) \
-        || { echo "pr	unavailable: $ghout"; ghout=""; }
-      if [ -n "$ghout" ]; then
-        rows=$(printf '%s' "$ghout" | python3 -c '
+      # A commit already found above is looked up by ITS sha, which finds
+      # its PR regardless of which of a joined branch's names was queried
+      # or what order they were joined in - head:<name> alone cannot: it is
+      # a prefix search, so head:beta never matches a branch alpha+beta.
+      # Every sha found is checked; results are deduped by PR number.
+      prs=""
+      if [ -n "$out" ]; then
+        while IFS=$'\t' read -r sha _; do
+          [ -n "$sha" ] || continue
+          if found=$(gh api "repos/{owner}/{repo}/commits/$sha/pulls" --jq '.[] | [.number,.title,.html_url] | @tsv' 2>/dev/null); then
+            [ -z "$found" ] || prs="${prs}${found}
+"
+          fi
+        done <<< "$out"
+      fi
+      if [ -n "$prs" ]; then
+        printf '%s' "$prs" | awk -F'\t' 'NF && !seen[$1]++ { print "pr\t"$1"\t"$2"\t"$3 }'
+      else
+        # no local commit is known to GitHub yet, or none matched at all -
+        # fall back to a head search, which only reliably finds a joined
+        # branch when the queried name happens to be its first part
+        ghout=$(gh pr list --search "head:${stables[0]}" --state all --json number,title,url,headRefName 2>&1) \
+          || { echo "pr	unavailable: $ghout"; ghout=""; }
+        if [ -n "$ghout" ]; then
+          rows=$(printf '%s' "$ghout" | python3 -c '
 import json, sys
 required = set(sys.argv[1:])
 for p in json.load(sys.stdin):
     if required <= set(p["headRefName"].split("+")):
         print("pr\t%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
 ' "${stables[@]}" 2>/dev/null || true)
-        if [ -n "$rows" ]; then printf '%s\n' "$rows"; else echo "pr	none found for head:$joined"; fi
+          if [ -n "$rows" ]; then printf '%s\n' "$rows"; else echo "pr	none found for head:$joined"; fi
+        fi
       fi
     fi ;;
   new)
