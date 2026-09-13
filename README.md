@@ -19,9 +19,9 @@ Speak naturally: "what's next?", "let's start on slugify", "remember this for la
 ## Git and GitHub standards
 
 - **One worktree per ticket.** A worktree claims its ticket so other sessions can see it is taken. The claim follows status changes, and ticket updates merge with the code.
-- **Meaningful commits.** Commit a coherent change, a settled decision or substantial progress worth preserving. Keep the ticket's stable name in the subject, such as `slugify: map Latin characters explicitly`, and explain useful reasoning in the body. User edits in shared files, and changes that depend on them, stay uncommitted for review.
+- **Meaningful commits.** Commit a coherent change, a settled decision or substantial progress worth preserving. Capitalize the subject and leave the ticket out of it, such as `Map Latin characters explicitly`, and carry the ticket's stable name in a trailing `Branch: slugify` line instead - it outlives the branch itself, findable with `git log --grep` even after the branch is deleted. Explain useful reasoning in the body. User edits in shared files, and changes that depend on them, stay uncommitted for review.
 - **PRs with context and evidence.** `/project:pr` uses the current conversation and branch. Descriptions open with an overview, followed by `### Changes`, `### Related` and `### Testing`. Related work links specs, tickets and PRs; testing names commands, results and what was verified. A validator checks structure and style; the agent checks the claims against the work.
-- **Visible handoffs.** The agent reports the branch, latest commit, verification results, anything uncommitted, and a review command such as `git diff main...todo-slugify`. It distinguishes tests of the committed snapshot from tests of the working tree. PR publication follows your request; commits on the default branch and merges require your instruction.
+- **Visible handoffs.** The agent reports the branch, latest commit, verification results, anything uncommitted, and a review command such as `git diff main...slugify`. It distinguishes tests of the committed snapshot from tests of the working tree. PR publication follows your request; commits on the default branch and merges require your instruction.
 
 Your instructions and repository conventions take precedence over the plugin's defaults.
 

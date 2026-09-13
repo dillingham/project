@@ -185,7 +185,7 @@ printf '# Waits\n\nPriority: high\nBlocked: todo-blocker.md - needs it first\n' 
 printf '# Taken\n\nPriority: high\n' > "$FIXTURE/project/todo-taken.md"
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
-git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b todo-taken
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b taken
 run blocked
 contains "$TEMP/output" 'BLOCKED'
 if grep -q 'UNBLOCKED' "$TEMP/output"; then echo 'FAIL: a live blocker read as lifted' >&2; cat "$TEMP/output" >&2; exit 1; fi
@@ -237,7 +237,7 @@ fixture
 printf '# Renamed\n\nPriority: high\n\n## Spike\n\nx\n\n## Todo\n\nx\n' > "$FIXTURE/project/todo-renamed.md"
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
-git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b spike-renamed
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b renamed
 run open
 grep -q 'todo-renamed.*CLAIMED' "$TEMP/output" || { echo 'FAIL: the claim did not follow the rename' >&2; cat "$TEMP/output" >&2; exit 1; }
 run next
@@ -246,7 +246,7 @@ if grep -q 'todo-renamed' "$TEMP/output"; then echo 'FAIL: next offered a claime
 cp "$FIXTURE/project/todo-renamed.md" "$TEMP/before"
 if run move done todo-renamed; then echo 'FAIL: moved a ticket claimed by another branch' >&2; exit 1; fi
 cmp "$TEMP/before" "$FIXTURE/project/todo-renamed.md"
-contains "$TEMP/output" 'claimed by spike-renamed'
+contains "$TEMP/output" 'claimed by renamed'
 (cd "$TEMP/worktree $passed" && bash "$SCRIPT" move done todo-renamed > /dev/null) || { echo 'FAIL: the claiming branch could not move its ticket' >&2; exit 1; }
 ok 'a claim follows its ticket through a status change, and only its branch may move it'
 
@@ -254,14 +254,14 @@ fixture
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
 WT="$TEMP/worktree $passed"
-git -C "$FIXTURE" worktree add -q "$WT" -b todo-example
+git -C "$FIXTURE" worktree add -q "$WT" -b example
 printf '\n### Checkpoint 2026-09-01\n\nNext: the old plan.\n\n### Checkpoint 2026-09-12\n\nFailed: the first approach.\nNext: the second approach.\n' >> "$WT/project/todo-example.md"
 git -C "$WT" -c user.name=Test -c user.email=test@example.test commit -qam checkpoint
 echo wip > "$WT/wip.txt"
 run resume todo-example
 contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$WT" rev-parse --show-toplevel)")"
 contains "$TEMP/output" '1 since'
-contains "$TEMP/output" '...todo-example'
+contains "$TEMP/output" '...example'
 contains "$TEMP/output" '?? wip.txt'
 contains "$TEMP/output" 'Next: the second approach.'
 if grep -q 'the old plan' "$TEMP/output"; then echo 'FAIL: resume showed a superseded checkpoint' >&2; exit 1; fi
@@ -289,7 +289,7 @@ DOC
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
 WT="$TEMP/worktree $passed"
-git -C "$FIXTURE" worktree add -q "$WT" -b spike-example
+git -C "$FIXTURE" worktree add -q "$WT" -b example
 run resume todo-example
 contains "$TEMP/output" 'none under ## Todo'
 contains "$TEMP/output" 'Approved: cache per request'
@@ -307,5 +307,25 @@ if run check; then echo 'FAIL: check passed a ## Done nobody wrote' >&2; exit 1;
 contains "$TEMP/output" 'project/done-shipped.md:7: P005  nothing written under ## Done'
 [ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: check held history or a fenced example against the ticket' >&2; cat "$TEMP/output" >&2; exit 1; }
 ok 'check flags a current section nobody wrote, and leaves earlier sections alone'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship the widget
+
+Branch: widget
+MSG
+run trail todo-widget
+contains "$TEMP/output" 'Ship the widget'
+# no remote is ever added to a fixture repo, so the pr lookup is always
+# unavailable here - for a reason that depends on whether this machine
+# happens to have gh installed, which the assertion does not care about
+contains "$TEMP/output" 'unavailable'
+run trail spike-widget
+contains "$TEMP/output" 'Ship the widget'
+run trail todo-missing-entirely
+contains "$TEMP/output" 'no commits carry Branch: missing-entirely'
+ok 'trail finds a commit by its Branch trailer under any status prefix, without touching project/, and reports plainly when a pr lookup cannot run'
 
 printf '%s scenarios passed.\n' "$passed"

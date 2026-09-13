@@ -30,9 +30,9 @@ hold() {
 
 repo
 run "$TEMP/worktrees $passed" 'todo-a+todo-b' || fail 'a joined id did not open a worktree'
-[ -d "$TEMP/worktrees $passed/repo-$passed-todo-a" ] || fail 'the folder is not named after the first id'
-git -C "$R" show-ref --verify --quiet 'refs/heads/todo-a+todo-b' || fail 'the branch lost the joined id'
-ok 'a joined id keeps its branch name and names its folder after the first id'
+[ -d "$TEMP/worktrees $passed/repo-$passed-a" ] || fail 'the folder is not named after the first ids stable part'
+git -C "$R" show-ref --verify --quiet 'refs/heads/a+b' || fail 'the branch did not drop each parts status word'
+ok 'a joined id drops each parts status word in its branch and names its folder after the first, stripped'
 
 repo
 echo edited > "$R/a.txt"
@@ -68,7 +68,7 @@ git -C "$R" add a.txt
 echo unstaged > "$R/a.txt"
 echo untracked > "$R/new.txt"
 run "$TEMP/worktrees $passed" todo-x --take || fail '--take did not open a worktree'
-D="$TEMP/worktrees $passed/repo-$passed-todo-x"
+D="$TEMP/worktrees $passed/repo-$passed-x"
 [ "$(git -C "$D" show :a.txt)" = staged ] || fail 'the staged version did not arrive staged'
 [ "$(cat "$D/a.txt")" = unstaged ] || fail 'the unstaged version did not arrive'
 [ "$(cat "$D/new.txt")" = untracked ] || fail 'the untracked file did not arrive'
@@ -100,7 +100,7 @@ chmod +x "$TEMP/bin $passed/git"
 (cd "$R" && PATH="$TEMP/bin $passed:$PATH" PROJECT_WORKTREES="$TEMP/worktrees $passed" bash "$SCRIPT" todo-x --take) > "$TEMP/output" 2>&1 \
   || fail '--take failed while another worktree pushed stashes'
 [ ! -e "$TEMP/stack $passed" ] || fail "--take read or wrote the shared stash stack: $(cat "$TEMP/stack $passed")"
-D="$TEMP/worktrees $passed/repo-$passed-todo-x"
+D="$TEMP/worktrees $passed/repo-$passed-x"
 [ "$(cat "$D/a.txt")" = mine ] && [ "$(cat "$D/new.txt")" = untracked ] || fail 'the worktree did not get the changes, untracked file included'
 [ "$(git -C "$R" stash list | wc -l | tr -d ' ')" = 3 ] && [ "$(git -C "$R" stash list --format=%gs | sort -u)" = 'On other: competitor' ] \
   || fail "the other worktree's stashes did not all survive: $(git -C "$R" stash list)"
@@ -115,8 +115,8 @@ git -C "$R" add -A
 git -C "$R" -c user.name=Test -c user.email=test@example.test commit -qm 'file todo-ship-it'
 (cd "$R" && bash "$P" next 2>/dev/null) | grep -q todo-ship-it || fail 'next does not offer the new ticket'
 run "$TEMP/worktrees $passed" todo-ship-it || fail 'the ticket did not get a worktree'
-D="$TEMP/worktrees $passed/repo-$passed-todo-ship-it"
-(cd "$R" && bash "$P" claimed) | grep -q "^todo-ship-it" || fail 'the worktree does not claim its ticket'
+D="$TEMP/worktrees $passed/repo-$passed-ship-it"
+(cd "$R" && bash "$P" claimed) | grep -q "^ship-it" || fail 'the worktree does not claim its ticket'
 if (cd "$R" && bash "$P" next 2>/dev/null) | grep -q todo-ship-it; then fail 'next still offers a claimed ticket'; fi
 (cd "$D" && bash "$P" move done todo-ship-it > /dev/null) || fail 'the ticket did not move to done inside its worktree'
 [ -f "$D/project/done-ship-it.md" ] && [ -f "$R/project/todo-ship-it.md" ] || fail 'the move reached beyond its worktree'
@@ -126,14 +126,14 @@ printf 'Shipped; `true` proves it.\n' >> "$D/project/done-ship-it.md"
 ok 'a ticket goes from filed, to offered, to claimed by its worktree, to done inside it'
 
 repo
-git -C "$R" worktree add -q "$TEMP/held $passed" -b todo-a
+git -C "$R" worktree add -q "$TEMP/held $passed" -b a
 run "$TEMP/worktrees $passed" 'todo-a+todo-b' && fail 'a joined id opened over a claimed ticket'
-grep -q 'todo-a is already claimed by todo-a' "$TEMP/output" || fail 'the refusal did not name the claim'
-git -C "$R" show-ref --verify --quiet 'refs/heads/todo-a+todo-b' && fail 'the refusal left a branch behind'
-git -C "$R" worktree add -q "$TEMP/spike $passed" -b spike-c
-run "$TEMP/worktrees $passed" todo-c && fail 'a ticket opened while its earlier status held a worktree'
-grep -q 'todo-c is already claimed by spike-c' "$TEMP/output" || fail 'the refusal did not name the earlier status'
-ok 'a claimed ticket, joined or under an earlier status, is refused before anything is created'
+grep -q 'todo-a is already claimed by a' "$TEMP/output" || fail 'the refusal did not name the claim'
+git -C "$R" show-ref --verify --quiet 'refs/heads/a+b' && fail 'the refusal left a branch behind'
+git -C "$R" worktree add -q "$TEMP/spike $passed" -b c
+run "$TEMP/worktrees $passed" todo-c && fail 'a ticket opened while a worktree from an earlier status held it'
+grep -q 'todo-c is already claimed by c' "$TEMP/output" || fail 'the refusal did not name the claiming branch'
+ok 'a claimed ticket, joined or claimed under an earlier status, is refused before anything is created'
 
 repo
 REAL_GIT=$(command -v git)
@@ -162,7 +162,7 @@ repo
 hold "$R/.git/project-worktree.lock"
 (cd "$R" && PROJECT_LOCK_WAIT=1 PROJECT_WORKTREES="$TEMP/worktrees $passed" bash "$SCRIPT" todo-x) > "$TEMP/output" 2>&1 && fail 'a start went ahead while another held the lock'
 grep -q 'has held' "$TEMP/output" || fail 'the refusal did not name the lock'
-git -C "$R" show-ref --verify --quiet refs/heads/todo-x && fail 'a start blocked on the lock still made a branch'
+git -C "$R" show-ref --verify --quiet refs/heads/x && fail 'a start blocked on the lock still made a branch'
 { kill -9 "$holder"; wait "$holder"; } 2>/dev/null || true
 run "$TEMP/worktrees $passed" todo-x || fail 'a killed holder still blocked the next start'
 ok 'a start waits on a held lock, and a killed holder blocks nothing'
@@ -190,9 +190,9 @@ kill -9 "$parent"; wait "$first" 2>/dev/null || true
   && fail 'a start went ahead while a killed start was still creating its worktree'
 touch "$TEMP/release $passed"
 while kill -0 "$child" 2>/dev/null; do sleep 0.1; done
-git -C "$R" show-ref --verify --quiet refs/heads/todo-a || fail 'the orphaned creation did not finish'
+git -C "$R" show-ref --verify --quiet refs/heads/a || fail 'the orphaned creation did not finish'
 run "$TEMP/worktrees $passed" 'todo-b+todo-a' && fail 'a joined id opened over the orphan'"'"'s claim'
-grep -q 'todo-a is already claimed by todo-a' "$TEMP/output" || fail 'the refusal did not name the claim'
+grep -q 'todo-a is already claimed by a' "$TEMP/output" || fail 'the refusal did not name the claim'
 ok 'a start killed mid-creation holds the lock until its worktree add finishes'
 
 printf '%s scenarios passed.\n' "$passed"
