@@ -214,20 +214,31 @@ stable_name() {
 # The live worktree claiming a ticket, as branch<TAB>path, matched the way
 # rows() matches: on the name after the status word, across + joins. awk reads
 # to the end rather than exiting, which under pipefail would SIGPIPE git.
+# mode "ticket" (the default): want is a ticket id (or a bare stable name),
+# matched against a branch's own +-joined parts - never against the whole
+# branch string, since a stable name derived from one ticket id can equal
+# another ticket's raw id verbatim (todo-widget's branch is widget, but
+# todo-todo-widget's branch is todo-widget - a literal collision with the
+# first ticket's own id). mode "branch" is the opposite case: want IS
+# already a live branch name (resume with no argument, reading its own
+# HEAD), so it is compared to the whole branch string and never re-parsed.
 claimer() {
-  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v statuses="$STATUSES" '
+  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v mode="${2:-ticket}" -v statuses="$STATUSES" '
     function slug(id,   s) {
       s = id; sub(/-.*/, "", s)
       if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
       sub(/^[^-]*-/, "", id); return id
     }
-    BEGIN { w = slug(want) }
+    BEGIN { if (mode == "ticket") { w = slug(want); if (w == "") w = want } }
     /^worktree / { p = substr($0, 10) }
     /^branch refs\/heads\// && !found {
       b = substr($0, 19); if (b == main) next
-      hit = (b == want)
-      n = split(b, part, "+")
-      for (i = 1; i <= n; i++) if (w != "" && part[i] == w) hit = 1
+      if (mode == "branch") {
+        hit = (b == want)
+      } else {
+        n = split(b, part, "+"); hit = 0
+        for (i = 1; i <= n; i++) if (part[i] == w) hit = 1
+      }
       if (hit) { print b "\t" p; found = 1 }
     }'
 }
@@ -398,7 +409,7 @@ move_ticket() (
 
 cmd="${1:-}"
 case "$cmd" in
-  ''|help|-h|--help|new) ;;
+  ''|help|-h|--help|new|trail) ;;
   *) [ -d "$DIR" ] || { echo "no project/ folder in $ROOT - start one with: project.sh new <status> <name>" >&2; exit 1; } ;;
 esac
 case "$cmd" in
@@ -420,12 +431,13 @@ case "$cmd" in
   resume)
     # Where a claimed ticket stands, read from its worktree: the branch's copy
     # of the ticket carries checkpoints the default branch has not seen yet.
-    n="${2:-}"
+    n="${2:-}"; mode=ticket
     if [ -z "$n" ]; then
       n=$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
       [ -n "$n" ] && [ "$n" != "$MAIN" ] || { echo "usage: project.sh resume <id> - or run it inside the ticket's worktree" >&2; exit 1; }
+      mode=branch
     fi
-    claim=$(claimer "${n%.md}")
+    claim=$(claimer "${n%.md}" "$mode")
     [ -n "$claim" ] || { echo "no live worktree claims $n - start one with /project:worktree $n" >&2; exit 1; }
     branch=${claim%%$'\t'*}; path=${claim#*$'\t'}
     printf 'branch\t%s\npath\t%s\n' "$branch" "$path"
@@ -490,28 +502,49 @@ case "$cmd" in
     out=$(git -C "$DIR/.." log --follow --format='%h%x09%ad%x09%s' --date=short -- "project/$n.md" 2>/dev/null || true)
     [ -n "$out" ] && echo "$out" || echo "uncommitted" ;;
   trail)
-    # code committed under the ticket's stable name, found by its Branch:
+    # code committed under the ticket's stable name(s), found by a Branch:
     # trailer rather than by the ticket file - this reaches a commit that
-    # never touched project/, and survives the file being long since gone
+    # never touched project/, and survives the file, and project/ itself,
+    # being long gone. A query part is matched as a whole +-joined token of
+    # the trailer value, never a substring and never required to be alone in
+    # it, so a single id also finds the commit for a joined worktree it
+    # shares a branch with, in either order.
     n="${2:?usage: project.sh trail <id>}"
-    stable=$(stable_name "$n")
-    pattern="^Branch: ${stable}"'$'
-    out=$(git -C "$ROOT" log --all --format='%h%x09%ad%x09%s' --date=short --grep="$pattern" 2>/dev/null || true)
-    if [ -n "$out" ]; then echo "$out"; else echo "no commits carry Branch: $stable"; fi
+    IFS='+' read -ra qparts <<< "$n"
+    stables=()
+    for qp in "${qparts[@]}"; do stables+=("$(stable_name "$qp")"); done
+    joined=$(printf '%s+' "${stables[@]}"); joined=${joined%+}
+    out=$(git -C "$ROOT" log --all --grep='^Branch: ' \
+            --format='%h%x09%ad%x09%s%x09%(trailers:key=Branch,valueonly,separator=%x2C)' --date=short 2>/dev/null \
+          | awk -F'\t' -v want="$joined" '
+              BEGIN { n = split(want, req, "+"); for (i = 1; i <= n; i++) needed[req[i]] = 1 }
+              {
+                m = split($4, have, "+"); for (i = 1; i <= m; i++) got[have[i]] = 1
+                ok = 1; for (k in needed) if (!(k in got)) ok = 0
+                if (ok) print $1"\t"$2"\t"$3
+                delete got
+              }' || true)
+    if [ -n "$out" ]; then echo "$out"; else echo "no commits carry Branch: $joined"; fi
     if ! command -v gh >/dev/null 2>&1; then
       echo "pr	unavailable: gh is not installed"
     elif ! git -C "$ROOT" remote get-url origin >/dev/null 2>&1; then
       echo "pr	unavailable: no origin remote"
     else
-      ghout=$(gh pr list --search "head:$stable" --state all --json number,title,url 2>&1) \
+      # head:<name> matches loosely (GitHub tokenizes the branch name, so
+      # head:slugify also surfaces slugify-followup) - the search only seeds
+      # candidates, and every one is re-checked below against its real
+      # headRefName before being reported as this ticket's PR
+      ghout=$(gh pr list --search "head:${stables[0]}" --state all --json number,title,url,headRefName 2>&1) \
         || { echo "pr	unavailable: $ghout"; ghout=""; }
       if [ -n "$ghout" ]; then
         rows=$(printf '%s' "$ghout" | python3 -c '
 import json, sys
+required = set(sys.argv[1:])
 for p in json.load(sys.stdin):
-    print("pr\t%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
-' 2>/dev/null || true)
-        if [ -n "$rows" ]; then printf '%s\n' "$rows"; else echo "pr	none found for head:$stable"; fi
+    if required <= set(p["headRefName"].split("+")):
+        print("pr\t%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
+' "${stables[@]}" 2>/dev/null || true)
+        if [ -n "$rows" ]; then printf '%s\n' "$rows"; else echo "pr	none found for head:$joined"; fi
       fi
     fi ;;
   new)

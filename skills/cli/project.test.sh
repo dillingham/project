@@ -328,4 +328,61 @@ run trail todo-missing-entirely
 contains "$TEMP/output" 'no commits carry Branch: missing-entirely'
 ok 'trail finds a commit by its Branch trailer under any status prefix, without touching project/, and reports plainly when a pr lookup cannot run'
 
+fixture
+printf '# Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-widget.md"
+printf '# Todo Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-todo-widget.md"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+git -C "$FIXTURE" worktree add -q "$TEMP/first $passed" -b widget
+git -C "$FIXTURE" worktree add -q "$TEMP/second $passed" -b todo-widget
+run resume todo-widget
+contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$TEMP/first $passed" rev-parse --show-toplevel)")"
+if grep -q "second $passed" "$TEMP/output"; then echo 'FAIL: resume matched the wrong tickets branch' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'resume matches a ticket id to its own branch, not to another ticket whose raw id equals it'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm init
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+echo '[{"number":1,"title":"Exact match","url":"https://example.com/pr/1","headRefName":"slugify"},{"number":2,"title":"False positive","url":"https://example.com/pr/2","headRefName":"slugify-followup"}]'
+SH
+chmod +x "$TEMP/bin $passed/gh"
+PATH="$TEMP/bin $passed:$PATH" run trail todo-slugify
+contains "$TEMP/output" 'Exact match'
+if grep -q 'False positive' "$TEMP/output"; then echo 'FAIL: trail attributed an unrelated pr from a loose head match' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'trail filters the gh search results by the exact head, not GitHubs loose head: match'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship a and b together
+
+Branch: a+b
+MSG
+run trail todo-a
+contains "$TEMP/output" 'Ship a and b together'
+run trail todo-b
+contains "$TEMP/output" 'Ship a and b together'
+run trail todo-c
+contains "$TEMP/output" 'no commits carry Branch: c'
+ok 'trail finds a joined branchs commit from either single ticket id, and not from an unrelated one'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship it
+
+Branch: gone-ticket
+MSG
+rm -rf "$FIXTURE/project"
+run trail todo-gone-ticket
+contains "$TEMP/output" 'Ship it'
+ok 'trail works even after project/ itself is gone'
+
 printf '%s scenarios passed.\n' "$passed"
