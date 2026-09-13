@@ -29,6 +29,7 @@ Running it with no arguments prints its own menu followed by what to pick up, so
 | "what's happening with binding" | `$P spec binding` | Group by status in the reply: what shipped, what is open. |
 | "is there anything about X" | `$P find X` | No rows means no match. Say so; do not guess. |
 | "add/remember/file X" | `$P new <status> <name>` | Write the body, then one line confirming. |
+| "import these notes", "backfill from GitHub", "backfill EmailReminder" | invoke the **backfill** skill (`/project:backfill <source>`) | Many items from one source is an import, not a string of `new` calls - see [backfill](../backfill/SKILL.md). |
 | "that's done", "close it" | `$P move done <filename>`, on the ticket's own branch | Reconcile first and fill in the `## Done` it appends - see Finishing below. |
 | "what shipped", "what landed this week", "what changed" | `cat project/changelog.md` | Answer from the top of it. The links go to the ticket carrying the reasoning. |
 | "latest todo", "what was added last", "what's new" | `$P show todo` (or whichever status they named) | One command: it prints the id it picked, then that whole file. Answer from it - do not list first. |
