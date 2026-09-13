@@ -185,7 +185,7 @@ printf '# Waits\n\nPriority: high\nBlocked: todo-blocker.md - needs it first\n' 
 printf '# Taken\n\nPriority: high\n' > "$FIXTURE/project/todo-taken.md"
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
-git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b todo-taken
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b taken
 run blocked
 contains "$TEMP/output" 'BLOCKED'
 if grep -q 'UNBLOCKED' "$TEMP/output"; then echo 'FAIL: a live blocker read as lifted' >&2; cat "$TEMP/output" >&2; exit 1; fi
@@ -237,7 +237,7 @@ fixture
 printf '# Renamed\n\nPriority: high\n\n## Spike\n\nx\n\n## Todo\n\nx\n' > "$FIXTURE/project/todo-renamed.md"
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
-git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b spike-renamed
+git -C "$FIXTURE" worktree add -q "$TEMP/worktree $passed" -b renamed
 run open
 grep -q 'todo-renamed.*CLAIMED' "$TEMP/output" || { echo 'FAIL: the claim did not follow the rename' >&2; cat "$TEMP/output" >&2; exit 1; }
 run next
@@ -246,7 +246,7 @@ if grep -q 'todo-renamed' "$TEMP/output"; then echo 'FAIL: next offered a claime
 cp "$FIXTURE/project/todo-renamed.md" "$TEMP/before"
 if run move done todo-renamed; then echo 'FAIL: moved a ticket claimed by another branch' >&2; exit 1; fi
 cmp "$TEMP/before" "$FIXTURE/project/todo-renamed.md"
-contains "$TEMP/output" 'claimed by spike-renamed'
+contains "$TEMP/output" 'claimed by renamed'
 (cd "$TEMP/worktree $passed" && bash "$SCRIPT" move done todo-renamed > /dev/null) || { echo 'FAIL: the claiming branch could not move its ticket' >&2; exit 1; }
 ok 'a claim follows its ticket through a status change, and only its branch may move it'
 
@@ -254,14 +254,14 @@ fixture
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
 WT="$TEMP/worktree $passed"
-git -C "$FIXTURE" worktree add -q "$WT" -b todo-example
+git -C "$FIXTURE" worktree add -q "$WT" -b example
 printf '\n### Checkpoint 2026-09-01\n\nNext: the old plan.\n\n### Checkpoint 2026-09-12\n\nFailed: the first approach.\nNext: the second approach.\n' >> "$WT/project/todo-example.md"
 git -C "$WT" -c user.name=Test -c user.email=test@example.test commit -qam checkpoint
 echo wip > "$WT/wip.txt"
 run resume todo-example
 contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$WT" rev-parse --show-toplevel)")"
 contains "$TEMP/output" '1 since'
-contains "$TEMP/output" '...todo-example'
+contains "$TEMP/output" '...example'
 contains "$TEMP/output" '?? wip.txt'
 contains "$TEMP/output" 'Next: the second approach.'
 if grep -q 'the old plan' "$TEMP/output"; then echo 'FAIL: resume showed a superseded checkpoint' >&2; exit 1; fi
@@ -289,7 +289,7 @@ DOC
 git -C "$FIXTURE" add -A
 git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
 WT="$TEMP/worktree $passed"
-git -C "$FIXTURE" worktree add -q "$WT" -b spike-example
+git -C "$FIXTURE" worktree add -q "$WT" -b example
 run resume todo-example
 contains "$TEMP/output" 'none under ## Todo'
 contains "$TEMP/output" 'Approved: cache per request'
@@ -307,5 +307,150 @@ if run check; then echo 'FAIL: check passed a ## Done nobody wrote' >&2; exit 1;
 contains "$TEMP/output" 'project/done-shipped.md:7: P005  nothing written under ## Done'
 [ "$(wc -l < "$TEMP/output" | tr -d ' ')" = 1 ] || { echo 'FAIL: check held history or a fenced example against the ticket' >&2; cat "$TEMP/output" >&2; exit 1; }
 ok 'check flags a current section nobody wrote, and leaves earlier sections alone'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship the widget
+
+Branch: widget
+MSG
+run trail todo-widget
+contains "$TEMP/output" 'Ship the widget'
+# no remote is ever added to a fixture repo, so the pr lookup is always
+# unavailable here - for a reason that depends on whether this machine
+# happens to have gh installed, which the assertion does not care about
+contains "$TEMP/output" 'unavailable'
+run trail spike-widget
+contains "$TEMP/output" 'Ship the widget'
+run trail todo-missing-entirely
+contains "$TEMP/output" 'no commits carry Branch: missing-entirely'
+ok 'trail finds a commit by its Branch trailer under any status prefix, without touching project/, and reports plainly when a pr lookup cannot run'
+
+fixture
+printf '# Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-widget.md"
+printf '# Todo Widget\n\nPriority: high\n' > "$FIXTURE/project/todo-todo-widget.md"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm board
+# git worktree list --porcelain sorts by PATH, not by creation order, so the
+# colliding branch's folder is named to sort FIRST - a whole-string fallback
+# would then match it before ever reaching the correct one; a fix that only
+# works because the correct branch happened to sort first would pass either way
+git -C "$FIXTURE" worktree add -q "$TEMP/aaa-collides $passed" -b todo-widget
+git -C "$FIXTURE" worktree add -q "$TEMP/zzz-correct $passed" -b widget
+run resume todo-widget
+contains "$TEMP/output" "$(printf 'path\t%s' "$(git -C "$TEMP/zzz-correct $passed" rev-parse --show-toplevel)")"
+if grep -q "aaa-collides $passed" "$TEMP/output"; then echo 'FAIL: resume matched the wrong tickets branch' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'resume matches a ticket id to its own branch, not to another ticket whose raw id equals it'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qm init
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+echo '[{"number":1,"title":"Exact match","url":"https://example.com/pr/1","headRefName":"slugify"},{"number":2,"title":"False positive","url":"https://example.com/pr/2","headRefName":"slugify-followup"}]'
+SH
+chmod +x "$TEMP/bin $passed/gh"
+PATH="$TEMP/bin $passed:$PATH" run trail todo-slugify
+contains "$TEMP/output" 'Exact match'
+if grep -q 'False positive' "$TEMP/output"; then echo 'FAIL: trail attributed an unrelated pr from a loose head match' >&2; cat "$TEMP/output" >&2; exit 1; fi
+ok 'trail filters the gh search results by the exact head, not GitHubs loose head: match'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship a and b together
+
+Branch: a+b
+MSG
+run trail todo-a
+contains "$TEMP/output" 'Ship a and b together'
+run trail todo-b
+contains "$TEMP/output" 'Ship a and b together'
+run trail todo-c
+contains "$TEMP/output" 'no commits carry Branch: c'
+ok 'trail finds a joined branchs commit from either single ticket id, and not from an unrelated one'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship it
+
+Branch: gone-ticket
+MSG
+rm -rf "$FIXTURE/project"
+run trail todo-gone-ticket
+contains "$TEMP/output" 'Ship it'
+ok 'trail works even after project/ itself is gone'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship alpha and beta together
+
+Branch: alpha+beta
+MSG
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *"head:alpha+beta"*) echo '[{"number":42,"title":"Ship it","url":"https://example.com/pr/42","headRefName":"alpha+beta"}]' ;;
+  *" pr "*" list "*) echo "[]" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TEMP/bin $passed/gh"
+# querying by beta, the SECOND part of the joined branch - a head:beta
+# search would never find alpha+beta on its own, since head: is a prefix
+# search; this only succeeds because the exact value discovered on the
+# matching commit (alpha+beta, in its real order) seeds the gh search
+PATH="$TEMP/bin $passed:$PATH" run trail todo-beta
+contains "$TEMP/output" "$(printf 'pr\t42\tShip it\thttps://example.com/pr/42')"
+ok 'trail finds a joined branchs pr by the exact head discovered on its commit, regardless of which ticket was queried'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship it alone
+
+Branch: solo
+MSG
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" pr "*" list "*) echo "[]" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TEMP/bin $passed/gh"
+PATH="$TEMP/bin $passed:$PATH" run trail todo-solo
+contains "$TEMP/output" 'pr	none found for head:solo'
+ok 'trail reports plainly when its commit is found but gh has no pr for that exact head'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship a and b separately
+
+Branch: a
+Branch: b
+MSG
+run trail todo-a
+contains "$TEMP/output" 'Ship a and b separately'
+run trail todo-b
+contains "$TEMP/output" 'Ship a and b separately'
+ok 'trail finds a commit carrying two separate Branch trailer lines, for either ticket'
 
 printf '%s scenarios passed.\n' "$passed"

@@ -13,7 +13,7 @@ For a lint-only request, run the validator on the existing body and report its f
 
 ## Read the change
 
-Read the repository's contribution instructions, PR template and recent titles for its conventions. Identify the target branch and the ticket's stable name, without its status prefix or `.md`. Keep that name in the title using the repository's style: `slugify: transliterate accented input` or `feat(slugify): transliterate accented input`. Do not invent a ticket for work that has none.
+Read the repository's contribution instructions, PR template and recent titles for its conventions. Capitalize the title as a plain sentence describing the change, in the repository's own style - plain, or `feat: ...` under Conventional Commits, where a scope names a code area rather than the ticket: `Transliterate accented input`, not `slugify: transliterate accented input`. The ticket's stable name - the branch, without its status prefix or `.md` - is what ties the PR back to it; do not invent a ticket for work that has none.
 
 Inspect the complete diff from the target branch's merge base to the proposed head, the commits, and the working-tree status. Read the changed code and the relevant specs, ticket sections and deferrals. Use the full change when rewriting a description, including changes made in earlier sessions. Describe what the committed branch includes; identify excluded local work separately, including dependent changes left out with a shared file. Old descriptions and commit messages are leads, not proof of what the branch now does.
 
@@ -42,7 +42,7 @@ Accented input now produces readable ASCII slugs. Explicit mappings cover letter
 - `python3 -m unittest tests.test_slugify` - passed: 10 tests at the proposed head.
 ```
 
-Changes are meaningful `- ` bullets about behavior and decisions, not a file inventory or a session diary. Keep the overview in prose. Use plain, concrete language and no em or en dashes in prose. Do not leave template instructions, `TODO`, `TBD` or `FIXME` fillers. Put literal examples in inline code or fenced blocks.
+Changes are meaningful `- ` bullets about behavior and decisions, not a file inventory or a session diary. Keep the overview in prose. Use plain, concrete language and no em or en dashes in prose. Do not leave template instructions, `TODO`, `TBD` or `FIXME` fillers. Put literal examples in inline code or fenced blocks. Never add a Co-Authored-By, Generated-by or other AI-attribution line, in the body or the commits it describes - the PR is the user's, opened on their instruction, the same reason a compiler is not credited on the binary it produces.
 
 Related has one row each for `Specs:`, `Tickets:` and `Related PRs:`. Use descriptive inline Markdown links, or `None identified.` for a category searched with no relevant match. Inspect references in the ticket, spec, commits and existing PR. Use available read access to find related PRs; if it is unavailable, say `None identified. PR lookup unavailable: <specific reason>.` without implying a complete search. Link repository files using forge URLs pinned to the proposed head's commit SHA so they resolve from the PR and survive branch deletion or later status renames. Check local paths and inspect related PRs where access permits; never invent a link.
 

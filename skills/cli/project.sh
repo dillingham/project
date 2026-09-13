@@ -43,6 +43,7 @@ project.sh - the board in project/. Every file is {status}-{name}.md.
   project.sh show <id>       print one file
   project.sh show <status>   print the newest file at that status
   project.sh log <id>        its commit trail: hash, date, subject (renames followed)
+  project.sh trail <id>      commits carrying Branch: <stable name>, and any PR for that head
   project.sh changelog       what landed, newest first, linked to its ticket
   project.sh check           broken links, anchors and bare ticket names in project/,
                              a ticket's current section left empty, and code citing
@@ -116,14 +117,16 @@ rows() {
       # a ticket with a live worktree of its own name is claimed - no header
       # to write or commit, git worktree list is already shared and instant.
       # related tickets sharing one branch join their ids with +, so a
-      # branch claims every id it names, not just the whole string. The
-      # match is on the name after the status, so a spike that becomes a
-      # todo mid-work stays claimed by the branch opened for the spike
+      # branch claims every id it names, not just the whole string. A live
+      # the branch is itself the ticket stable name (its status word was
+      # dropped when the worktree opened), so it is matched here verbatim,
+      # never re-parsed - which is also why a spike that becomes a todo
+      # mid-work stays claimed by the branch opened for the spike
       while ((getline wl < branchf) > 0) {
         b = wl; sub(/^branch refs\/heads\//, "", b)
         if (b != main) {
           wn = split(b, wp, "+")
-          for (wi = 1; wi <= wn; wi++) { s = slug(wp[wi]); if (s != "") claimed[s] = 1 }
+          for (wi = 1; wi <= wn; wi++) { if (wp[wi] != "") claimed[wp[wi]] = 1 }
         }
       }
 
@@ -198,23 +201,44 @@ emit() { awk -F'\037' -v OFS='\t' '{ print $2, $3, $4, $7, $8, $5, $6 }'; }
 newest() { sort -t"$SEP" -k7,7r; }
 open_only() { awk -F'\037' '$3!="done" && $3!="reject" && $3!="spec" && $3!="list"'; }
 
+# the stable part of an id - what a status change never touches, and what a
+# commit's Branch: trailer carries - so trail can key code to a ticket even
+# once its file is gone from the working tree
+stable_name() {
+  case "$1" in
+    idea-*|spike-*|todo-*|issue-*|done-*|reject-*|spec-*|list-*) echo "${1#*-}" ;;
+    *) echo "$1" ;;
+  esac
+}
+
 # The live worktree claiming a ticket, as branch<TAB>path, matched the way
 # rows() matches: on the name after the status word, across + joins. awk reads
 # to the end rather than exiting, which under pipefail would SIGPIPE git.
+# mode "ticket" (the default): want is a ticket id (or a bare stable name),
+# matched against a branch's own +-joined parts - never against the whole
+# branch string, since a stable name derived from one ticket id can equal
+# another ticket's raw id verbatim (todo-widget's branch is widget, but
+# todo-todo-widget's branch is todo-widget - a literal collision with the
+# first ticket's own id). mode "branch" is the opposite case: want IS
+# already a live branch name (resume with no argument, reading its own
+# HEAD), so it is compared to the whole branch string and never re-parsed.
 claimer() {
-  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v statuses="$STATUSES" '
+  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v mode="${2:-ticket}" -v statuses="$STATUSES" '
     function slug(id,   s) {
       s = id; sub(/-.*/, "", s)
       if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
       sub(/^[^-]*-/, "", id); return id
     }
-    BEGIN { w = slug(want) }
+    BEGIN { if (mode == "ticket") { w = slug(want); if (w == "") w = want } }
     /^worktree / { p = substr($0, 10) }
     /^branch refs\/heads\// && !found {
       b = substr($0, 19); if (b == main) next
-      hit = (b == want)
-      n = split(b, part, "+")
-      for (i = 1; i <= n; i++) if (w != "" && slug(part[i]) == w) hit = 1
+      if (mode == "branch") {
+        hit = (b == want)
+      } else {
+        n = split(b, part, "+"); hit = 0
+        for (i = 1; i <= n; i++) if (part[i] == w) hit = 1
+      }
       if (hit) { print b "\t" p; found = 1 }
     }'
 }
@@ -385,7 +409,7 @@ move_ticket() (
 
 cmd="${1:-}"
 case "$cmd" in
-  ''|help|-h|--help|new) ;;
+  ''|help|-h|--help|new|trail) ;;
   *) [ -d "$DIR" ] || { echo "no project/ folder in $ROOT - start one with: project.sh new <status> <name>" >&2; exit 1; } ;;
 esac
 case "$cmd" in
@@ -407,12 +431,13 @@ case "$cmd" in
   resume)
     # Where a claimed ticket stands, read from its worktree: the branch's copy
     # of the ticket carries checkpoints the default branch has not seen yet.
-    n="${2:-}"
+    n="${2:-}"; mode=ticket
     if [ -z "$n" ]; then
       n=$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
       [ -n "$n" ] && [ "$n" != "$MAIN" ] || { echo "usage: project.sh resume <id> - or run it inside the ticket's worktree" >&2; exit 1; }
+      mode=branch
     fi
-    claim=$(claimer "${n%.md}")
+    claim=$(claimer "${n%.md}" "$mode")
     [ -n "$claim" ] || { echo "no live worktree claims $n - start one with /project:worktree $n" >&2; exit 1; }
     branch=${claim%%$'\t'*}; path=${claim#*$'\t'}
     printf 'branch\t%s\npath\t%s\n' "$branch" "$path"
@@ -423,9 +448,9 @@ case "$cmd" in
     dirty=$(git -C "$path" status --short)
     if [ -n "$dirty" ]; then printf 'uncommitted\n%s\n' "$(printf '%s\n' "$dirty" | sed 's/^/  /')"; else printf 'uncommitted\tnone\n'; fi
     for part in $(printf '%s' "$branch" | tr '+' ' '); do
-      case " $STATUSES " in *" ${part%%-*} "*) ;; *) continue ;; esac
-      # found by its name after the status, whatever status the branch moved it to
-      ticket=$(for s in $STATUSES; do if [ -f "$path/project/$s-${part#*-}.md" ]; then echo "$s-${part#*-}.md"; break; fi; done)
+      # the branch names its ticket's stable part directly now; try it
+      # against every status and take whichever file actually exists
+      ticket=$(for s in $STATUSES; do if [ -f "$path/project/$s-$part.md" ]; then echo "$s-$part.md"; break; fi; done)
       [ -n "$ticket" ] || { printf 'ticket\t%s is not on this branch\n' "$part"; continue; }
       printf 'ticket\t%s\n' "$path/project/$ticket"
       # Only the section for the status the ticket holds now: a spike's
@@ -476,6 +501,87 @@ case "$cmd" in
     [ -e "$DIR/$n.md" ] || { echo "no $n" >&2; exit 1; }
     out=$(git -C "$DIR/.." log --follow --format='%h%x09%ad%x09%s' --date=short -- "project/$n.md" 2>/dev/null || true)
     [ -n "$out" ] && echo "$out" || echo "uncommitted" ;;
+  trail)
+    # code committed under the ticket's stable name(s), found by a Branch:
+    # trailer rather than by the ticket file - this reaches a commit that
+    # never touched project/, and survives the file, and project/ itself,
+    # being long gone. A query part is matched as a whole +-joined token of
+    # the trailer value, never a substring and never required to be alone in
+    # it, so a single id also finds the commit for a joined worktree it
+    # shares a branch with, in either order. The trailer itself may also
+    # repeat - git folds two separate Branch: lines into one comma-joined
+    # value here - so each occurrence is split on the comma before its own
+    # +-joined names are split out, rather than treating the whole thing as
+    # one token none of them will ever equal.
+    n="${2:?usage: project.sh trail <id>}"
+    IFS='+' read -ra qparts <<< "$n"
+    stables=()
+    for qp in "${qparts[@]}"; do stables+=("$(stable_name "$qp")"); done
+    joined=$(printf '%s+' "${stables[@]}"); joined=${joined%+}
+    matches=$(git -C "$ROOT" log --all --grep='^Branch: ' \
+            --format='%h%x09%ad%x09%s%x09%(trailers:key=Branch,valueonly,separator=%x2C)' --date=short 2>/dev/null \
+          | awk -F'\t' -v want="$joined" '
+              BEGIN { n = split(want, req, "+"); for (i = 1; i <= n; i++) needed[req[i]] = 1 }
+              {
+                vn = split($4, values, ",")
+                for (v = 1; v <= vn; v++) { m = split(values[v], have, "+"); for (i = 1; i <= m; i++) got[have[i]] = 1 }
+                ok = 1; for (k in needed) if (!(k in got)) ok = 0
+                if (ok) print $0
+                delete got
+              }' || true)
+    out=$(printf '%s\n' "$matches" | awk -F'\t' 'NF{print $1"\t"$2"\t"$3}')
+    if [ -n "$out" ]; then echo "$out"; else echo "no commits carry Branch: $joined"; fi
+    if ! command -v gh >/dev/null 2>&1; then
+      echo "pr	unavailable: gh is not installed"
+    elif ! git -C "$ROOT" remote get-url origin >/dev/null 2>&1; then
+      echo "pr	unavailable: no origin remote"
+    else
+      # Search by the exact head(s) actually found on a matching commit above,
+      # when there are any - that value already carries its true join and
+      # order, so it succeeds where a guess built only from the query could
+      # not, and --state all reaches a closed, never-merged PR that GitHub's
+      # commit-to-PR API deliberately excludes (it returns only open or
+      # merged ones).
+      #
+      # Falls back to the query's own guess only when no local commit was
+      # found to discover a real head from. That fallback is best-effort,
+      # not a complete remote lookup: head: is a prefix search, so it still
+      # misses a joined branch, such as alpha+beta, when queried by a part
+      # that is not its first - beta alone never finds alpha+beta - and
+      # nothing short of listing every PR in the repository and filtering
+      # client-side closes that gap. Deliberately not done: the ceiling
+      # such a listing would need is arbitrary, and paying that cost on
+      # every trail call is a worse trade than an honest miss in the one
+      # case that needs it - a joined ticket queried by a non-leading part,
+      # with no local commit yet to reveal the join.
+      heads=$(printf '%s\n' "$matches" | awk -F'\t' 'NF{ vn=split($4,values,","); for (v=1;v<=vn;v++) print values[v] }' | awk '!seen[$0]++')
+      [ -n "$heads" ] || heads="$joined"
+      prs=""; failure=""
+      while IFS= read -r head; do
+        [ -n "$head" ] || continue
+        if ghout=$(gh pr list --search "head:$head" --state all --json number,title,url,headRefName 2>&1); then
+          [ -n "$ghout" ] || continue
+          rows=$(printf '%s' "$ghout" | python3 -c '
+import json, sys
+required = set(sys.argv[1:])
+for p in json.load(sys.stdin):
+    if required <= set(p["headRefName"].split("+")):
+        print("%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
+' "${stables[@]}" 2>/dev/null || true)
+          [ -z "$rows" ] || prs="${prs}${rows}
+"
+        else
+          failure="$ghout"
+        fi
+      done <<< "$heads"
+      if [ -n "$prs" ]; then
+        printf '%s' "$prs" | awk -F'\t' 'NF && !seen[$1]++ { print "pr\t"$1"\t"$2"\t"$3 }'
+      elif [ -n "$failure" ]; then
+        echo "pr	unavailable: $failure"
+      else
+        echo "pr	none found for head:$joined"
+      fi
+    fi ;;
   new)
     s="${2:?usage: project.sh new <status> <name>}"; n="${3:?usage: project.sh new <status> <name>}"
     case " $STATUSES " in *" $s "*) ;; *) echo "status must be one of: $STATUSES" >&2; exit 1;; esac

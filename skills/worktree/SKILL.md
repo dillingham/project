@@ -17,13 +17,13 @@ W="${CLAUDE_SKILL_DIR}/worktree.sh"
 $W <id>
 ```
 
-`<id>` is a ticket id from `project/` (`todo-calendar`, not `calendar`) or, for `--take` below, just a name you pick. Report the path it printed, or the abort reason verbatim, then work there.
+`<id>` is a ticket id from `project/` (`todo-calendar`, not `calendar`) or, for `--take` below, just a name you pick. The branch it creates drops the status word - `calendar`, not `todo-calendar` - so it stays accurate once the ticket's status moves on without it; a name with no recognized status word is kept as given. Report the path it printed, or the abort reason verbatim, then work there.
 
 **Run it. Do not narrate it.** Deciding a ticket and then describing what a worktree would do, without actually invoking this skill, is the failure this file exists to prevent - if the conversation reaches "let's start on X", the very next tool call is this script, not a sentence about it.
 
 ## What it does
 
-`$W <id>` opens a fresh worktree for `<id>` at `~/Worktrees/<reponame>-<id>`, branched off the default branch - `origin/HEAD` when there is a remote, else `main`, else `master`. The folder carries the repo's name because every repo's worktrees share one folder; set `PROJECT_WORKTREES` to use a different one.
+`$W <id>` opens a fresh worktree for `<id>` at `~/Worktrees/<reponame>-<stable-id>`, branched off the default branch - `origin/HEAD` when there is a remote, else `main`, else `master`. The folder carries the repo's name because every repo's worktrees share one folder; set `PROJECT_WORKTREES` to use a different one.
 
 It refuses rather than guesses: the default branch must be clean (`git status --porcelain` empty) or it aborts and prints exactly what is dirty, the default branch is fast-forwarded from origin first when a remote exists and left alone when there is none, and it aborts rather than reuses if the branch or the destination folder already exists. A name git will not take as a branch, or one whose folder would pass 63 characters, is refused before anything is created.
 
@@ -66,4 +66,4 @@ It refuses a ticket a live worktree already claims - one joined into another bra
 
 ## Joining tickets on one branch
 
-Two tickets that belong on the same branch - one names the other as `Blocked:`, or the work is genuinely one change - are not a reason to force a single id. Join both with `+`: `$W todo-a+todo-b`. The branch keeps the whole name, and the board's claim check splits on `+`, so both ids show `CLAIMED` and both drop out of `next`. The folder, and so the hostname, is named after the first id alone, because `+` is not a legal hostname character.
+Two tickets that belong on the same branch - one names the other as `Blocked:`, or the work is genuinely one change - are not a reason to force a single id. Join both with `+`: `$W todo-a+todo-b`. The branch drops each part's status word - `a+b` - and the board's claim check splits on `+`, so both ids show `CLAIMED` and both drop out of `next`. The folder, and so the hostname, is named after the first id's stable part alone, because `+` is not a legal hostname character.

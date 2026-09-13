@@ -30,12 +30,27 @@ mainpath=$(git -C "$REPO_ROOT" worktree list --porcelain | awk -v b="refs/heads/
 reponame=$(basename "$mainpath")
 
 # Refuse a bad name before anything is created, not halfway through setup.
-# The branch keeps the id verbatim, `+` joins included - the board splits
-# claims on it. The folder doubles as a hostname under Herd, where `+` is not
-# a legal character and a label caps at 63, so a joined id names its folder
-# after its FIRST id: the folder only has to be unique and typable.
-git check-ref-format --branch "$n" >/dev/null 2>&1 || { echo "not a usable branch name: $n" >&2; exit 1; }
-folder=$(printf '%s-%s' "$reponame" "${n%%+*}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-')
+# The branch drops each part's status word - todo-slugify becomes slugify -
+# so it stays accurate no matter how many times the ticket's status changes
+# under it, `+` joins included: todo-a+todo-b becomes a+b. A name with no
+# recognized status word (a --take name) is kept verbatim - it names no
+# ticket, so there is nothing to strip. The folder doubles as a hostname
+# under Herd, where `+` is not a legal character and a label caps at 63, so
+# a joined id names its folder after its FIRST part: the folder only has to
+# be unique and typable.
+stable_part() {
+  case "$1" in
+    idea-*|spike-*|todo-*|issue-*|done-*|reject-*|spec-*|list-*) echo "${1#*-}" ;;
+    *) echo "$1" ;;
+  esac
+}
+branch=""
+IFS='+' read -ra idparts <<< "$n"
+for idpart in "${idparts[@]}"; do
+  branch="${branch:+$branch+}$(stable_part "$idpart")"
+done
+git check-ref-format --branch "$branch" >/dev/null 2>&1 || { echo "not a usable branch name: $branch" >&2; exit 1; }
+folder=$(printf '%s-%s' "$reponame" "${branch%%+*}" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' | tr -s '-')
 folder=${folder%-}
 [ "${#folder}" -le 63 ] || { echo "folder name $folder is ${#folder} characters; a hostname label caps at 63 - pick a shorter id" >&2; exit 1; }
 
@@ -120,9 +135,14 @@ while True:
         time.sleep(0.2)
 ' "${PROJECT_LOCK_WAIT:-60}" || abort "another worktree start has held $lock for ${PROJECT_LOCK_WAIT:-60}s, aborting"
 
-# One live worktree per ticket. The board matches a claim on the name after
-# the status word, across + joins, so todo-a+todo-b is refused while any
-# worktree holds todo-a - or holds spike-a, opened before it became a todo.
+# One live worktree per ticket. A live branch is already a stable name (this
+# is the direction that has to stay unambiguous - a ticket named, say,
+# spec-reactive-fields would mis-parse as status "spec" if we tried to strip
+# one back out of it), so the requested id's stable parts are checked
+# directly against each branch's own `+`-joined parts, never re-derived from
+# them. todo-a+todo-b is refused while any worktree's branch holds the part
+# "a" - including one opened as spike-a and still named "a" now that it is a
+# todo.
 claims=$(git -C "$mainpath" worktree list --porcelain | awk -v base="$base" -v want="$n" -v statuses="idea spike todo issue done reject spec list" '
   function slug(id,   s) {
     s = id; sub(/-.*/, "", s)
@@ -134,12 +154,12 @@ claims=$(git -C "$mainpath" worktree list --porcelain | awk -v base="$base" -v w
   /^branch refs\/heads\// {
     b = substr($0, 19); if (b == base) next
     k = split(b, part, "+")
-    for (i = 1; i <= k; i++) { s = slug(part[i]); if (s in ours) print ours[s] " is already claimed by " b " at " p }
+    for (i = 1; i <= k; i++) { if (part[i] in ours) print ours[part[i]] " is already claimed by " b " at " p }
   }')
 [ -z "$claims" ] || abort "$claims - resume it there (project.sh resume ${n%%+*}), or remove that worktree first"
 
-git -C "$mainpath" show-ref --verify --quiet "refs/heads/$n" \
-  && abort "branch $n already exists, aborting - resume there or pick a different id"
+git -C "$mainpath" show-ref --verify --quiet "refs/heads/$branch" \
+  && abort "branch $branch already exists, aborting - resume there or pick a different id"
 dest="$WORKTREES/$folder"
 [ -e "$dest" ] && abort "$dest already exists, aborting"
 
@@ -164,7 +184,7 @@ if git -C "$mainpath" remote get-url origin >/dev/null 2>&1; then
 fi
 
 mkdir -p "$WORKTREES" || abort "cannot create $WORKTREES, aborting"
-git -C "$mainpath" worktree add "$dest" -b "$n" "$base" || abort "worktree add failed, aborting"
+git -C "$mainpath" worktree add "$dest" -b "$branch" "$base" || abort "worktree add failed, aborting"
 trap - EXIT
 # the claim is live now, so the next start waiting on the lock will see it
 exec 9>&-
