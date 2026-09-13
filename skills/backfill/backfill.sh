@@ -39,7 +39,7 @@ from pathlib import Path
 mode, root, arg, limit = sys.argv[1], Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4])
 MARKER = re.compile(r'(?<![\w-])(?:TODO|FIXME|HACK|XXX)(?![\w-])(?:\([^)]*\))?[\s:]*(.*)')
 CHECKBOX = re.compile(r'^\s*[-*+]\s+\[ \]\s+(.*)')
-FENCE = re.compile(r'^\s*(```|~~~)')
+FENCE = re.compile(r'^\s*(`{3,}|~{3,})(.*)$')
 CLOSER = re.compile(r'\s*(\*/|-->|--}}|#}|%>|\?>)\s*$')
 DECL = re.compile(r'^\s*(?:(?:export|public|private|protected|abstract|final|static|async|pub|default)\s+)*'
                   r'(?:class|interface|trait|enum|function|def|func|fn|module|struct|type)\s+\w')
@@ -58,8 +58,9 @@ def cites(pattern):
     return ','.join(name for name, text in board.items() if rx.search(text)) or '-'
 
 def path_cites(rel):
-    # whole path only: notes/a.md must not match xnotes/a.md or notes/a.md.bak
-    return cites(r'(?<![\w./-])' + re.escape(rel) + r'(?![\w/-])')
+    # whole path only: notes/a.md must not match xnotes/a.md or notes/a.md.bak,
+    # while a sentence may still end on it
+    return cites(r'(?<![\w./-])' + re.escape(rel) + r'(?![\w/-]|\.\w)')
 
 def rel(p):
     p = Path(p).resolve()
@@ -68,12 +69,15 @@ def rel(p):
     except ValueError:
         return str(p)
 
-def text_of(p):
+def text_of(p, loud):
+    # a source that cannot be read is a failed collection, never an empty one
     try:
         data = p.read_bytes()
-    except OSError:
-        return None
+    except OSError as exc:
+        die(f'cannot read {rel(p)}: {exc.strerror or exc}')
     if b'\0' in data[:8192] or len(data) > 2_000_000:
+        if loud:
+            print(f'backfill.sh: skipped {rel(p)}: binary or over 2MB', file=sys.stderr)
         return None
     return data.decode('utf-8', errors='replace')
 
@@ -98,18 +102,23 @@ if mode == 'md':
     if not files:
         print(f'backfill.sh: no markdown under {arg}', file=sys.stderr)
     for p in files:
-        text = text_of(p)
+        text = text_of(p, True)
         if text is None:
             continue
         r, cited = rel(p), path_cites(rel(p))
         heading = next((l[2:] for l in text.splitlines() if l.startswith('# ')), p.stem)
         emit(r, 'doc', heading, cited)
-        fenced = False
+        # a fence closes only on its own character, at least as long, with
+        # nothing after it - so a ``` example inside a ```` block stays inside
+        fence = None
         for n, line in enumerate(text.splitlines(), 1):
-            if FENCE.match(line):
-                fenced = not fenced
+            f = FENCE.match(line)
+            if fence:
+                if f and f.group(1)[0] == fence[0] and len(f.group(1)) >= fence[1] and not f.group(2).strip():
+                    fence = None
                 continue
-            if fenced:
+            if f:
+                fence = (f.group(1)[0], len(f.group(1)))
                 continue
             box = CHECKBOX.match(line)
             if box:
@@ -144,7 +153,7 @@ elif mode == 'code':
 
     found = 0
     for p in scope:
-        text = text_of(p)
+        text = text_of(p, p.resolve() == target)
         if text is None:
             continue
         lines = text.splitlines()
@@ -175,7 +184,8 @@ elif mode == 'gh':
         n = i['number']
         labels = ', '.join(l['name'] for l in i.get('labels') or [])
         title = i['title'] + (f' [{labels}]' if labels else '')
-        emit(f'gh#{n}', 'issue', title, cites(rf'(?<![\w#])gh#{n}(?!\d)|/issues/{n}(?!\d)'))
+        # the full URL, never a bare /issues/n, which any other repository has too
+        emit(f'gh#{n}', 'issue', title, cites(rf'(?<![\w#])gh#{n}(?!\d)|' + re.escape(i['url']) + r'(?![\w/])'))
     if len(issues) >= limit:
         print(f'backfill.sh: stopped at {limit} issues; narrow it with a search', file=sys.stderr)
 PY

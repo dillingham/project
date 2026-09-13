@@ -63,9 +63,9 @@ Every row a subagent was given ends up under a `from:` or a `dropped:`, so nothi
 One agent - you, not a subagent - merges the proposals:
 
 - Collapse proposals for the same work, from two notes or two issues, into one file citing both sources.
-- Check each against the board with `$P find <its key term>`. A match is appended to, never duplicated and never rewritten.
+- Check each against the board with `$P find <its key term>`. A keyword match is a lead, not a home: append only when the file is the same work, and never rewrite it. Outstanding work never goes into a `done-` or a `reject-`, where `next` and `groom` cannot see it; what a closed ticket left unfinished gets its own open ticket, linking the closed one.
 - Create each new file with `$P new <status> <name>`, so the header is the board's own, then write its title and body. `new` writes `Priority: groom` on every file; delete it from a `spec-` or a `list-`, which carry none.
-- Extend an existing ticket by appending under its current section. A `spec-` that already owns the subject is governed by the repo, per chat's Where things belong: file tickets against it with `Spec:`, and report what it is missing rather than rewriting it.
+- Extend an existing open ticket by appending under its current section. A `spec-` that already owns the subject is governed by the repo, per chat's Where things belong: file tickets against it with `Spec:`, and report what it is missing rather than rewriting it.
 
 Then run `$P check`, and fix whatever it reports in files you wrote.
 
