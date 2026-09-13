@@ -42,7 +42,7 @@ Accented input now produces readable ASCII slugs. Explicit mappings cover letter
 - `python3 -m unittest tests.test_slugify` - passed: 10 tests at the proposed head.
 ```
 
-Changes are meaningful `- ` bullets about behavior and decisions, not a file inventory or a session diary. Keep the overview in prose. Use plain, concrete language and no em or en dashes in prose. Do not leave template instructions, `TODO`, `TBD` or `FIXME` fillers. Put literal examples in inline code or fenced blocks.
+Changes are meaningful `- ` bullets about behavior and decisions, not a file inventory or a session diary. Keep the overview in prose. Use plain, concrete language and no em or en dashes in prose. Do not leave template instructions, `TODO`, `TBD` or `FIXME` fillers. Put literal examples in inline code or fenced blocks. Never add a Co-Authored-By, Generated-by or other AI-attribution line, in the body or the commits it describes - the PR is the user's, opened on their instruction, the same reason a compiler is not credited on the binary it produces.
 
 Related has one row each for `Specs:`, `Tickets:` and `Related PRs:`. Use descriptive inline Markdown links, or `None identified.` for a category searched with no relevant match. Inspect references in the ticket, spec, commits and existing PR. Use available read access to find related PRs; if it is unavailable, say `None identified. PR lookup unavailable: <specific reason>.` without implying a complete search. Link repository files using forge URLs pinned to the proposed head's commit SHA so they resolve from the PR and survive branch deletion or later status renames. Check local paths and inspect related PRs where access permits; never invent a link.
 
