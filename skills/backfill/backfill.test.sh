@@ -6,13 +6,14 @@ set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backfill.sh"
 TEMP=$(mktemp -d "${TMPDIR:-/tmp}/backfill-test.XXXXXX")
-trap 'rm -rf "$TEMP"' EXIT
+trap 'chmod -R u+rwx "$TEMP" 2>/dev/null; rm -rf "$TEMP"' EXIT
 git -C "$TEMP" init -q
 mkdir -p "$TEMP/project" "$TEMP/notes/sub" "$TEMP/notes/.trash" "$TEMP/src/Reminders" "$TEMP/vendor" "$TEMP/bin"
 T=$'\t'
 
 printf '# Auth\n\nPriority: groom\n\n## Todo\n\nBackfilled from `notes/auth.md` and gh#12. Also notes/fences.md.\n' > "$TEMP/project/todo-auth.md"
 printf '# Other\n\nPriority: groom\n\n## Idea\n\nSee `xnotes/sub/billing.md`, `notes/sub/billing.md.bak`, gh#1200, https://github.com/other/dep/issues/7 and https://github.com/a/b/issues/8.\n' > "$TEMP/project/idea-other.md"
+printf '# Dependency\n\nPriority: groom\n\n## Idea\n\nBackfilled from gh#13, https://github.com/other/dependency/issues/13.\n' > "$TEMP/project/idea-dependency.md"
 cat > "$TEMP/notes/fences.md" <<'MD'
 ````markdown
 ```php
@@ -97,7 +98,7 @@ cat > "$TEMP/bin/gh" <<SH
 #!/usr/bin/env bash
 printf '%s\n' "\$*" > "$TEMP/gh-args"
 [ -z "\${GH_FAIL:-}" ] || { echo 'HTTP 401' >&2; exit 1; }
-printf '%s' '[{"number":12,"title":"Login\\tbroken","labels":[{"name":"bug"}],"url":"https://github.com/a/b/issues/12"},{"number":120,"title":"Dark mode","labels":[],"url":"https://github.com/a/b/issues/120"},{"number":7,"title":"Seven","labels":[],"url":"https://github.com/a/b/issues/7"},{"number":8,"title":"Eight","labels":[],"url":"https://github.com/a/b/issues/8"}]'
+printf '%s' '[{"number":12,"title":"Login\\tbroken","labels":[{"name":"bug"}],"url":"https://github.com/a/b/issues/12"},{"number":120,"title":"Dark mode","labels":[],"url":"https://github.com/a/b/issues/120"},{"number":7,"title":"Seven","labels":[],"url":"https://github.com/a/b/issues/7"},{"number":8,"title":"Eight","labels":[],"url":"https://github.com/a/b/issues/8"},{"number":13,"title":"Thirteen","labels":[],"url":"https://github.com/a/b/issues/13"}]'
 SH
 chmod +x "$TEMP/bin/gh"
 PATH="$TEMP/bin:$PATH" run gh label:bug
@@ -108,7 +109,8 @@ grep -Fq -- '--search label:bug' "$TEMP/gh-args" || fail 'the search was not pas
 grep -Fq -- '--state open' "$TEMP/gh-args" || fail 'gh was not limited to open issues'
 expect "gh#7${T}issue${T}Seven${T}-"
 expect "gh#8${T}issue${T}Eight${T}idea-other.md"
-echo 'PASS: issues are listed with their labels, gh#12 is not gh#120, and another repository'"'"'s issue 7 is not this one'
+expect "gh#13${T}issue${T}Thirteen${T}-"
+echo 'PASS: issues are listed with their labels, gh#12 is not gh#120, and another repository'"'"'s issue 7 or 13 is not this one, even beside gh#13'
 
 GH_FAIL=1 PATH="$TEMP/bin:$PATH" run gh
 [ "$code" -eq 2 ] || fail "a failed gh call exited $code, not 2"
@@ -120,14 +122,27 @@ run nope
 [ "$code" -eq 2 ] || fail "an unknown source exited $code, not 2"
 echo 'PASS: a failed gh call, a missing folder and bad arguments exit 2'
 
-# last, because an unreadable file anywhere in the repo fails every code run too
-mkdir -p "$TEMP/locked"
+# last, because an unreadable path fails every run whose scope reaches it
+mkdir -p "$TEMP/locked/sub"
 printf '# Secret\n- [ ] hidden work\n' > "$TEMP/locked/secret.md"
-chmod 000 "$TEMP/locked/secret.md"
-if [ -r "$TEMP/locked/secret.md" ]; then
-  echo 'SKIP: running as a user who can read a mode-000 file'
+printf '# Deep\n- [ ] deep work\n' > "$TEMP/locked/sub/deep.md"
+chmod 000 "$TEMP/locked/sub"
+if ls "$TEMP/locked/sub" >/dev/null 2>&1; then
+  echo 'SKIP: running as a user who can read a mode-000 folder'
 else
   run md locked
+  [ "$code" -eq 2 ] && grep -q 'cannot read locked/sub' "$TEMP/err" || fail "an unreadable folder inside the notes exited $code without naming it"
+  run md locked/sub
+  [ "$code" -eq 2 ] && grep -q 'cannot read locked/sub' "$TEMP/err" || fail "an unreadable notes folder exited $code without naming it"
+  run code EmailReminder
+  [ "$code" -eq 2 ] && grep -q 'cannot read locked/sub' "$TEMP/err" || fail "a subject search past an unreadable folder exited $code without naming it"
+  run code src/Reminders
+  [ "$code" -eq 0 ] || fail "an unreadable folder outside the path failed the run with $code"
+  echo 'PASS: an unreadable folder fails every run it could hide work from, naming it, and no other'
+
+  chmod 755 "$TEMP/locked/sub"; rm -rf "$TEMP/locked/sub"
+  chmod 000 "$TEMP/locked/secret.md"
+  run md locked
   [ "$code" -eq 2 ] && grep -q 'cannot read locked/secret.md' "$TEMP/err" || fail "an unreadable note exited $code without naming it"
-  echo 'PASS: an unreadable source fails with its path, instead of vanishing'
+  echo 'PASS: an unreadable note fails with its path, instead of vanishing'
 fi

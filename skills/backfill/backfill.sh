@@ -33,7 +33,7 @@ command -v python3 >/dev/null || { echo 'backfill.sh: python3 is required' >&2; 
 
 # read -d '' rather than $(cat <<...): bash 3.2 misparses a heredoc inside $() once it holds a lone paren
 read -r -d '' COLLECT <<'PY' || true
-import json, re, subprocess, sys
+import json, os, re, subprocess, sys
 from pathlib import Path
 
 mode, root, arg, limit = sys.argv[1], Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4])
@@ -61,6 +61,16 @@ def path_cites(rel):
     # whole path only: notes/a.md must not match xnotes/a.md or notes/a.md.bak,
     # while a sentence may still end on it
     return cites(r'(?<![\w./-])' + re.escape(rel) + r'(?![\w/-]|\.\w)')
+
+def issue_cites(n, url):
+    # the full URL is authoritative, never a bare /issues/n, which every
+    # repository has. The gh#n shorthand counts only in a file naming no other
+    # repository's issue n, since there it could mean either.
+    own = re.compile(re.escape(url) + r'(?![\w/])')
+    short = re.compile(rf'(?<![\w#])gh#{n}(?!\d)')
+    urls = re.compile(rf'https?://\S+?/issues/{n}(?![\w/])')
+    return ','.join(name for name, text in board.items()
+                    if own.search(text) or (short.search(text) and all(own.match(u) for u in urls.findall(text)))) or '-'
 
 def rel(p):
     p = Path(p).resolve()
@@ -90,15 +100,26 @@ def marker(line):
     m = MARKER.search(line)
     return CLOSER.sub('', m.group(1)) if m else None
 
-def hidden(p, base):
-    return any(part.startswith('.') or part == 'node_modules' for part in p.relative_to(base).parts[:-1])
+def walk(base):
+    # os.walk rather than rglob, which skips a folder it cannot open without a word
+    def fail(exc):
+        die(f'cannot read {rel(exc.filename or base)}: {exc.strerror or exc}')
+    for top, dirs, names in os.walk(base, onerror=fail):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != 'node_modules']
+        for name in names:
+            yield Path(top) / name
+
+def is_file(p):
+    try:
+        return p.is_file()
+    except OSError as exc:
+        die(f'cannot read {rel(p)}: {exc.strerror or exc}')
 
 if mode == 'md':
     src = Path(arg).resolve()
     if not src.is_dir():
         die(f'not a directory: {arg}')
-    files = sorted(p for p in src.rglob('*')
-                   if p.is_file() and p.suffix.lower() in ('.md', '.markdown') and not hidden(p, src))
+    files = sorted(p for p in walk(src) if p.suffix.lower() in ('.md', '.markdown') and is_file(p))
     if not files:
         print(f'backfill.sh: no markdown under {arg}', file=sys.stderr)
     for p in files:
@@ -127,18 +148,27 @@ if mode == 'md':
                 emit(f'{r}:{n}', 'marker', m, cited)
 
 elif mode == 'code':
+    target = Path(arg).resolve()
+    scoped = target.exists()
+    # a path scopes the run, so only an unreadable folder that could hide part of it fails it
+    def reaches(p):
+        return not scoped or p == target or target in p.parents or p in target.parents
+
     listed = subprocess.run(['git', '-C', str(root), 'ls-files', '-z', '--cached', '--others', '--exclude-standard'],
                             capture_output=True)
     if listed.returncode == 0:
         candidates = [root / n for n in listed.stdout.decode('utf-8', 'replace').split('\0') if n]
+        # ls-files warns about a folder it cannot open, then carries on and exits 0
+        for d, why in re.findall(r"could not open directory '([^']*)': (.*)", listed.stderr.decode('utf-8', 'replace')):
+            if reaches((root / d).resolve()):
+                die(f"cannot read {d.rstrip('/')}: {why}")
     else:
-        candidates = [p for p in root.rglob('*') if p.is_file() and not hidden(p, root)]
+        candidates = list(walk(root))
     # the board is the destination, never a source
-    candidates = sorted(p for p in candidates if p.is_file() and not rel(p).startswith('project/'))
+    candidates = sorted(p for p in candidates if not rel(p).startswith('project/'))
 
-    target = Path(arg).resolve()
-    if target.exists():
-        scope = [p for p in candidates if p.resolve() == target or target in p.resolve().parents]
+    if scoped:
+        scope = [p for p in candidates if (p.resolve() == target or target in p.resolve().parents) and is_file(p)]
         subject = None
         if not scope:
             print(f'backfill.sh: no files under {arg}', file=sys.stderr)
@@ -184,8 +214,7 @@ elif mode == 'gh':
         n = i['number']
         labels = ', '.join(l['name'] for l in i.get('labels') or [])
         title = i['title'] + (f' [{labels}]' if labels else '')
-        # the full URL, never a bare /issues/n, which any other repository has too
-        emit(f'gh#{n}', 'issue', title, cites(rf'(?<![\w#])gh#{n}(?!\d)|' + re.escape(i['url']) + r'(?![\w/])'))
+        emit(f'gh#{n}', 'issue', title, issue_cites(n, i['url']))
     if len(issues) >= limit:
         print(f'backfill.sh: stopped at {limit} issues; narrow it with a search', file=sys.stderr)
 PY
