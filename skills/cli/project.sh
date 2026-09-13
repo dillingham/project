@@ -518,7 +518,7 @@ case "$cmd" in
     stables=()
     for qp in "${qparts[@]}"; do stables+=("$(stable_name "$qp")"); done
     joined=$(printf '%s+' "${stables[@]}"); joined=${joined%+}
-    out=$(git -C "$ROOT" log --all --grep='^Branch: ' \
+    matches=$(git -C "$ROOT" log --all --grep='^Branch: ' \
             --format='%h%x09%ad%x09%s%x09%(trailers:key=Branch,valueonly,separator=%x2C)' --date=short 2>/dev/null \
           | awk -F'\t' -v want="$joined" '
               BEGIN { n = split(want, req, "+"); for (i = 1; i <= n; i++) needed[req[i]] = 1 }
@@ -526,48 +526,49 @@ case "$cmd" in
                 vn = split($4, values, ",")
                 for (v = 1; v <= vn; v++) { m = split(values[v], have, "+"); for (i = 1; i <= m; i++) got[have[i]] = 1 }
                 ok = 1; for (k in needed) if (!(k in got)) ok = 0
-                if (ok) print $1"\t"$2"\t"$3
+                if (ok) print $0
                 delete got
               }' || true)
+    out=$(printf '%s\n' "$matches" | awk -F'\t' 'NF{print $1"\t"$2"\t"$3}')
     if [ -n "$out" ]; then echo "$out"; else echo "no commits carry Branch: $joined"; fi
     if ! command -v gh >/dev/null 2>&1; then
       echo "pr	unavailable: gh is not installed"
     elif ! git -C "$ROOT" remote get-url origin >/dev/null 2>&1; then
       echo "pr	unavailable: no origin remote"
     else
-      # A commit already found above is looked up by ITS sha, which finds
-      # its PR regardless of which of a joined branch's names was queried
-      # or what order they were joined in - head:<name> alone cannot: it is
-      # a prefix search, so head:beta never matches a branch alpha+beta.
-      # Every sha found is checked; results are deduped by PR number.
-      prs=""
-      if [ -n "$out" ]; then
-        while IFS=$'\t' read -r sha _; do
-          [ -n "$sha" ] || continue
-          if found=$(gh api "repos/{owner}/{repo}/commits/$sha/pulls" --jq '.[] | [.number,.title,.html_url] | @tsv' 2>/dev/null); then
-            [ -z "$found" ] || prs="${prs}${found}
-"
-          fi
-        done <<< "$out"
-      fi
-      if [ -n "$prs" ]; then
-        printf '%s' "$prs" | awk -F'\t' 'NF && !seen[$1]++ { print "pr\t"$1"\t"$2"\t"$3 }'
-      else
-        # no local commit is known to GitHub yet, or none matched at all -
-        # fall back to a head search, which only reliably finds a joined
-        # branch when the queried name happens to be its first part
-        ghout=$(gh pr list --search "head:${stables[0]}" --state all --json number,title,url,headRefName 2>&1) \
-          || { echo "pr	unavailable: $ghout"; ghout=""; }
-        if [ -n "$ghout" ]; then
+      # Search by the exact head(s) actually found on a matching commit above,
+      # when there are any - that value already carries its true join and
+      # order, so it succeeds where a guess built only from the query could
+      # not, and --state all reaches a closed, never-merged PR that GitHub's
+      # commit-to-PR API deliberately excludes (it returns only open or
+      # merged ones). Falls back to the query's own guess only when no local
+      # commit was found to discover a real head from.
+      heads=$(printf '%s\n' "$matches" | awk -F'\t' 'NF{ vn=split($4,values,","); for (v=1;v<=vn;v++) print values[v] }' | awk '!seen[$0]++')
+      [ -n "$heads" ] || heads="$joined"
+      prs=""; failure=""
+      while IFS= read -r head; do
+        [ -n "$head" ] || continue
+        if ghout=$(gh pr list --search "head:$head" --state all --json number,title,url,headRefName 2>&1); then
+          [ -n "$ghout" ] || continue
           rows=$(printf '%s' "$ghout" | python3 -c '
 import json, sys
 required = set(sys.argv[1:])
 for p in json.load(sys.stdin):
     if required <= set(p["headRefName"].split("+")):
-        print("pr\t%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
+        print("%s\t%s\t%s" % (p["number"], p["title"], p["url"]))
 ' "${stables[@]}" 2>/dev/null || true)
-          if [ -n "$rows" ]; then printf '%s\n' "$rows"; else echo "pr	none found for head:$joined"; fi
+          [ -z "$rows" ] || prs="${prs}${rows}
+"
+        else
+          failure="$ghout"
         fi
+      done <<< "$heads"
+      if [ -n "$prs" ]; then
+        printf '%s' "$prs" | awk -F'\t' 'NF && !seen[$1]++ { print "pr\t"$1"\t"$2"\t"$3 }'
+      elif [ -n "$failure" ]; then
+        echo "pr	unavailable: $failure"
+      else
+        echo "pr	none found for head:$joined"
       fi
     fi ;;
   new)

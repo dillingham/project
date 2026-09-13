@@ -402,17 +402,41 @@ mkdir -p "$TEMP/bin $passed"
 cat > "$TEMP/bin $passed/gh" <<'SH'
 #!/usr/bin/env bash
 case " $* " in
-  *" api "*"/pulls"*) echo "42	Ship alpha and beta together	https://example.com/pr/42" ;;
+  *"head:alpha+beta"*) echo '[{"number":42,"title":"Ship it","url":"https://example.com/pr/42","headRefName":"alpha+beta"}]' ;;
   *" pr "*" list "*) echo "[]" ;;
   *) exit 1 ;;
 esac
 SH
 chmod +x "$TEMP/bin $passed/gh"
 # querying by beta, the SECOND part of the joined branch - a head:beta
-# search would never find alpha+beta, since head: is a prefix search
+# search would never find alpha+beta on its own, since head: is a prefix
+# search; this only succeeds because the exact value discovered on the
+# matching commit (alpha+beta, in its real order) seeds the gh search
 PATH="$TEMP/bin $passed:$PATH" run trail todo-beta
-contains "$TEMP/output" 'Ship alpha and beta together'
-ok 'trail finds a joined branchs pr by the commit it found, regardless of which of its tickets was queried'
+contains "$TEMP/output" "$(printf 'pr\t42\tShip it\thttps://example.com/pr/42')"
+ok 'trail finds a joined branchs pr by the exact head discovered on its commit, regardless of which ticket was queried'
+
+fixture
+printf 'hello\n' > "$FIXTURE/a.txt"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" -c user.name=Test -c user.email=test@example.test commit -qF - <<'MSG'
+Ship it alone
+
+Branch: solo
+MSG
+git -C "$FIXTURE" remote add origin https://example.com/fake/repo.git
+mkdir -p "$TEMP/bin $passed"
+cat > "$TEMP/bin $passed/gh" <<'SH'
+#!/usr/bin/env bash
+case " $* " in
+  *" pr "*" list "*) echo "[]" ;;
+  *) exit 1 ;;
+esac
+SH
+chmod +x "$TEMP/bin $passed/gh"
+PATH="$TEMP/bin $passed:$PATH" run trail todo-solo
+contains "$TEMP/output" 'pr	none found for head:solo'
+ok 'trail reports plainly when its commit is found but gh has no pr for that exact head'
 
 fixture
 printf 'hello\n' > "$FIXTURE/a.txt"
