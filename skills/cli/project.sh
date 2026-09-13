@@ -6,14 +6,26 @@ set -euo pipefail
 # the board belongs to the repo you are standing in, not to wherever this script is installed
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DIR="$ROOT/project"
-# a worktree on the default branch is not a claim; origin's HEAD names it, else main, else master
+# a worktree on the default branch is not a claim; origin's HEAD names it,
+# else main, else master, else main again as the fallback guess
 MAIN=$(git -C "$ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true); MAIN=${MAIN#origin/}
 if [ -z "$MAIN" ]; then
   MAIN=main
-  git -C "$ROOT" show-ref --verify --quiet refs/heads/main 2>/dev/null \
-    || ! git -C "$ROOT" show-ref --verify --quiet refs/heads/master 2>/dev/null || MAIN=master
+  for b in main master; do
+    git -C "$ROOT" show-ref --verify --quiet "refs/heads/$b" 2>/dev/null && { MAIN=$b; break; }
+  done
 fi
 STATUSES="idea spike todo issue done reject spec list"
+# the name after the status word, which a status change leaves alone; empty
+# for anything that does not lead with a status. Shared by rows() and
+# claimer(), which both parse ids this same way.
+read -r -d '' SLUG_AWK <<'AWK' || true
+    function slug(id,   s) {
+      s = id; sub(/-.*/, "", s)
+      if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
+      sub(/^[^-]*-/, "", id); return id
+    }
+AWK
 STALE_DAYS=${PROJECT_STALE_DAYS:-30}
 NOW=$(date +%s)
 SEP=$(printf '\037')
@@ -78,7 +90,7 @@ rows() {
   grep -H "^Blocked: " "$DIR"/*.md > "$blockf" 2>/dev/null || true
   git -C "$DIR/.." worktree list --porcelain 2>/dev/null | grep "^branch " > "$branchf" || true
 
-  awk -F'|' -v main="$MAIN" -v now="$NOW" -v stale="$STALE_DAYS" -v gitf="$gitf" -v lsf="$lsf" -v blockf="$blockf" -v branchf="$branchf" -v statuses="$STATUSES" -v tzoff="$TZ_OFFSET" '
+  awk -F'|' -v main="$MAIN" -v now="$NOW" -v stale="$STALE_DAYS" -v gitf="$gitf" -v lsf="$lsf" -v blockf="$blockf" -v branchf="$branchf" -v statuses="$STATUSES" -v tzoff="$TZ_OFFSET" "$SLUG_AWK"'
     # civil-from-days, because this awk has no strftime
     function stamp(t,   z, era, doe, yoe, y, doy, mp, d, m, secs) {
       t = t + tzoff
@@ -96,13 +108,6 @@ rows() {
       return sprintf("%04d-%02d-%02d %02d:%02d", y, m, d, int(secs/3600), int((secs%3600)/60))
     }
     function rank(p) { return p=="critical"?0 : p=="high"?1 : p=="medium"?2 : p=="low"?3 : p=="groom"?4 : 5 }
-    # the name after the status word, which a status change leaves alone;
-    # empty for anything that does not lead with a status
-    function slug(id,   s) {
-      s = id; sub(/-.*/, "", s)
-      if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
-      sub(/^[^-]*-/, "", id); return id
-    }
     BEGIN {
       OFS="\037"
       # every ticket that exists, and the reverse index of Blocked: lines
@@ -163,6 +168,9 @@ rows() {
       # the output separator must never appear in the data. Nothing in project/
       # carries a tab today, and a stray one would silently split a column.
       gsub(/\t/, " ", title); gsub(/\t/, " ", spec)
+      # the blocked reason, up to any second ": " on the line - kept as a
+      # column here so blocked (below) does not reopen every file it just read
+      reason = blocked; sub(/: .*/, "", reason); gsub(/\t/, " ", reason)
       close(path)
       if (pri=="") pri="none"
 
@@ -190,7 +198,7 @@ rows() {
         flag = flag (lifted ? " UNBLOCKED?" : " BLOCKED")
       }
       if (base in blocks) { flag = flag " BLOCKS:" blocks[base] }
-      print r, pri, st, base, title, spec, created, idle"d" bump flag
+      print r, pri, st, base, title, spec, created, idle"d" bump flag, reason
     }
   ' "$statf" | sort -t"$(printf '\037')" -k1,1n -k8,8r
 }
@@ -200,6 +208,7 @@ emit() { awk -F'\037' -v OFS='\t' '{ print $2, $3, $4, $7, $8, $5, $6 }'; }
 # first. next/open/groom/board keep the priority rank rows() sorted on.
 newest() { sort -t"$SEP" -k7,7r; }
 open_only() { awk -F'\037' '$3!="done" && $3!="reject" && $3!="spec" && $3!="list"'; }
+capitalize() { printf '%s' "$1" | awk '{print toupper(substr($0,1,1)) substr($0,2)}'; }
 
 # the stable part of an id - what a status change never touches, and what a
 # commit's Branch: trailer carries - so trail can key code to a ticket even
@@ -223,12 +232,7 @@ stable_name() {
 # already a live branch name (resume with no argument, reading its own
 # HEAD), so it is compared to the whole branch string and never re-parsed.
 claimer() {
-  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v mode="${2:-ticket}" -v statuses="$STATUSES" '
-    function slug(id,   s) {
-      s = id; sub(/-.*/, "", s)
-      if (id !~ /-/ || index(" " statuses " ", " " s " ") == 0) return ""
-      sub(/^[^-]*-/, "", id); return id
-    }
+  { git -C "$ROOT" worktree list --porcelain 2>/dev/null || true; } | awk -v main="$MAIN" -v want="$1" -v mode="${2:-ticket}" -v statuses="$STATUSES" "$SLUG_AWK"'
     BEGIN { if (mode == "ticket") { w = slug(want); if (w == "") w = want } }
     /^worktree / { p = substr($0, 10) }
     /^branch refs\/heads\// && !found {
@@ -273,10 +277,9 @@ next_up() {
 # the caller stages it; leave the index alone, including any staged user work.
 move_ticket() (
   local status="$1" id="${2%.md}" dry_run="${3:-}"
-  local root src dst heading stage file candidate target index count=0 applied=0
+  local src dst heading stage file candidate target index count=0 applied=0
   local renamed=0 committed=0 result last_newline spec claim
   local -a files=()
-  root="$(cd "$DIR/.." && pwd)"
   case "$status" in idea|spike|todo|issue|done|reject|spec|list) ;; *) echo "invalid status: $status" >&2; exit 1;; esac
   [[ "$id" =~ ^(idea|spike|todo|issue|done|reject|spec|list)-[a-z0-9]+(-[a-z0-9]+)*$ ]] \
     || { echo "expected a ticket filename or id: $2" >&2; exit 1; }
@@ -291,10 +294,10 @@ move_ticket() (
   # status on its claiming branch and reaches the default branch with the
   # merge. Moved anywhere else, the two renames collide when it lands.
   claim=$(claimer "$id")
-  if [ -n "$claim" ] && [ "${claim%%$'\t'*}" != "$(git -C "$root" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" ]; then
+  if [ -n "$claim" ] && [ "${claim%%$'\t'*}" != "$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" ]; then
     echo "$id.md is claimed by ${claim%%$'\t'*} at ${claim#*$'\t'} - move it there, or remove that worktree first" >&2; exit 1
   fi
-  heading=$(printf '%s' "$status" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+  heading=$(capitalize "$status")
   stage=$(mktemp -d "${TMPDIR:-/tmp}/project-move.XXXXXX")
   trap '
     result=$?
@@ -315,11 +318,11 @@ move_ticket() (
 
   # Include tracked and untracked text, recursively, honoring Git ignores.
   # A filename is a reference even inside backticks, code, or old prose.
-  git -C "$root" grep -Ilz --untracked --exclude-standard -F "$id" > "$stage/candidates" \
+  git -C "$ROOT" grep -Ilz --untracked --exclude-standard -F "$id" > "$stage/candidates" \
     || { result=$?; [ "$result" -eq 1 ] || exit "$result"; }
   printf '%s\0' "project/$id.md" >> "$stage/candidates"
   while IFS= read -r -d '' candidate; do
-    file="$root/$candidate"
+    file="$ROOT/$candidate"
     [ "$file" != "$src" ] || [ ! -e "$stage/source-seen" ] || continue
     [ "$file" != "$src" ] || touch "$stage/source-seen"
     [ ! -L "$file" ] || { echo "cannot update symlink: $candidate" >&2; exit 1; }
@@ -369,11 +372,11 @@ move_ticket() (
 
   printf '%s -> %s%s\n' "${src##*/}" "${dst##*/}" "${dry_run:+ (dry run)}"
   for ((index=0; index<count; index++)); do
-    printf '  update: %s\n' "${files[index]#"$root/"}"
+    printf '  update: %s\n' "${files[index]#"$ROOT/"}"
   done
   if [ "$dry_run" = --dry-run ]; then
     for ((index=0; index<count; index++)); do
-      diff -u -L "${files[index]#"$root/"}" -L "${files[index]#"$root/"} (after)" \
+      diff -u -L "${files[index]#"$ROOT/"}" -L "${files[index]#"$ROOT/"} (after)" \
         "$stage/$index.before" "$stage/$index.after" || [ "$?" -eq 1 ]
     done
     exit 0
@@ -418,10 +421,11 @@ case "$cmd" in
   next) next_up ;;
   groom) rows | open_only | awk -F'\037' '$2=="groom" && $8 !~ /BLOCKED/ && $8 !~ /CLAIMED/' | emit ;;
   blocked)
-    # the reason lives in the header, and the reason is the point
-    rows | open_only | awk -F'\037' '$8 ~ /BLOCKED|UNBLOCKED/' | while IFS="$SEP" read -r _ p st b t sp age idle; do
-      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$p" "$st" "$b" "$idle" "$t" \
-        "$(awk -F': ' '/^Blocked: /{print $2; exit}' "$DIR/$b.md")"
+    # the reason lives in the header, and the reason is the point - rows()
+    # already parsed it once, so this reads that column instead of reforking
+    # awk per row to reread the file
+    rows | open_only | awk -F'\037' '$8 ~ /BLOCKED|UNBLOCKED/' | while IFS="$SEP" read -r _ p st b t sp age idle reason; do
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$p" "$st" "$b" "$idle" "$t" "$reason"
     done ;;
   unblocked) rows | open_only | awk -F'\037' '$8 ~ /UNBLOCKED/' | emit ;;
   claimed)
@@ -456,7 +460,7 @@ case "$cmd" in
       # Only the section for the status the ticket holds now: a spike's
       # checkpoint is history once the ticket is a todo. The newest checkpoint
       # there is the current state; with none, the section itself is.
-      title="## $(printf '%s' "${ticket%%-*}" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')"
+      title="## $(capitalize "${ticket%%-*}")"
       awk -v title="$title" '
         /^[[:space:]]*```/ { fenced = !fenced }
         !fenced && /^## / { insec = ($0 == title); oncp = 0; if (insec) { sec = ""; cp = "" } }
@@ -587,9 +591,8 @@ for p in json.load(sys.stdin):
     case " $STATUSES " in *" $s "*) ;; *) echo "status must be one of: $STATUSES" >&2; exit 1;; esac
     mkdir -p "$DIR"
     f="$DIR/$s-$n.md"; [ -e "$f" ] && { echo "$f exists" >&2; exit 1; }
-    S=$(echo "$s" | tr '[:lower:]' '[:upper:]' | cut -c1)$(echo "$s" | cut -c2-)
     # untriaged until someone with standing judges it - see groom in chat's SKILL.md
-    printf '# %s\n\nPriority: groom\n\n## %s\n\n' "$(echo "$n" | tr '-' ' ')" "$S" > "$f"
+    printf '# %s\n\nPriority: groom\n\n## %s\n\n' "$(echo "$n" | tr '-' ' ')" "$(capitalize "$s")" > "$f"
     echo "$f" ;;
   move|mv)
     [ "$#" -ge 3 ] && [ "$#" -le 4 ] || { echo "usage: project.sh move <status> <filename> [--dry-run]" >&2; exit 1; }

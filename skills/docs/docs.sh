@@ -154,9 +154,17 @@ def heading_ids(heads):
         ids.append(candidate)
     return ids
 
-def anchors(text):
+_lines_cache = {}
+def get_lines(path):
+    """parse(), memoized per resolved path - lint, stats and anchors all read the same pages."""
+    key = str(Path(path).resolve())
+    if key not in _lines_cache:
+        _lines_cache[key] = parse(Path(path).read_text())
+    return _lines_cache[key]
+
+def anchors(path):
     """Every id a page offers a link."""
-    return set(heading_ids(headings(parse(text))))
+    return set(heading_ids(headings(get_lines(path))))
 
 def headings(lines):
     return [(n, len(m.group(1)), m.group(2).strip())
@@ -164,8 +172,7 @@ def headings(lines):
             for m in [re.match(r"^(#+)\s+(.*)$", raw.strip())] if m]
 
 def lint(path):
-    text = Path(path).read_text()
-    lines = parse(text)
+    lines = get_lines(path)
     heads = headings(lines)
     found = []
     def hit(n, code, msg): found.append((n, code, msg))
@@ -329,7 +336,7 @@ def lint(path):
                 continue
             if str(dest).startswith(PROJECT + os.sep):
                 hit(n, "D042", f"links into project/: {target}")
-            if frag and dest.suffix == ".md" and frag not in anchors(dest.read_text()):
+            if frag and dest.suffix == ".md" and frag not in anchors(dest):
                 hit(n, "D041", f"no heading on {dest.name} for #{frag}")
         for ticket in sorted(set(re.findall(TICKET, bare))):
             hit(n, "D042", f"names {ticket}; docs never send a reader into project/")
@@ -344,7 +351,7 @@ def stats(paths):
     may = can = notes = warns = 0
     h = {2: 0, 3: 0, 4: 0}
     for p in paths:
-        lines = parse(Path(p).read_text())
+        lines = get_lines(p)
         run = 0; depth = 0; length = 0
         for n, k, raw in lines:
             if k == "fence":
