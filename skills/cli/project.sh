@@ -541,8 +541,19 @@ case "$cmd" in
       # order, so it succeeds where a guess built only from the query could
       # not, and --state all reaches a closed, never-merged PR that GitHub's
       # commit-to-PR API deliberately excludes (it returns only open or
-      # merged ones). Falls back to the query's own guess only when no local
-      # commit was found to discover a real head from.
+      # merged ones).
+      #
+      # Falls back to the query's own guess only when no local commit was
+      # found to discover a real head from. That fallback is best-effort,
+      # not a complete remote lookup: head: is a prefix search, so it still
+      # misses a joined branch, such as alpha+beta, when queried by a part
+      # that is not its first - beta alone never finds alpha+beta - and
+      # nothing short of listing every PR in the repository and filtering
+      # client-side closes that gap. Deliberately not done: the ceiling
+      # such a listing would need is arbitrary, and paying that cost on
+      # every trail call is a worse trade than an honest miss in the one
+      # case that needs it - a joined ticket queried by a non-leading part,
+      # with no local commit yet to reveal the join.
       heads=$(printf '%s\n' "$matches" | awk -F'\t' 'NF{ vn=split($4,values,","); for (v=1;v<=vn;v++) print values[v] }' | awk '!seen[$0]++')
       [ -n "$heads" ] || heads="$joined"
       prs=""; failure=""
