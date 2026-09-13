@@ -48,6 +48,12 @@ printf '<?php\n// queues an email_reminder later\n$todo = 1;\n' > "$TEMP/src/Oth
 printf '<?php\n// TODO: unrelated\n' > "$TEMP/src/Unrelated.php"
 printf '<?php\n// TODO: EmailReminder vendored\n' > "$TEMP/vendor/EmailReminderLib.php"
 printf 'vendor/\n' > "$TEMP/.gitignore"
+# the index names both, and neither is a file: a tracked file deleted from the
+# working tree, and a submodule, whose entry is a folder
+printf '<?php\n' > "$TEMP/src/Gone.php"
+git -C "$TEMP" add src/Gone.php && rm "$TEMP/src/Gone.php"
+git -C "$TEMP" update-index --add --cacheinfo 160000,1111111111111111111111111111111111111111,lib/dependency
+mkdir -p "$TEMP/lib/dependency"
 
 run() { out=$(cd "$TEMP" && bash "$SCRIPT" "$@" 2>"$TEMP/err") && code=0 || code=$?; }
 fail() { echo "FAIL: $1"; echo "$out"; cat "$TEMP/err"; exit 1; }

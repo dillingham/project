@@ -179,7 +179,8 @@ elif mode == 'code':
         if not words:
             die(f'nothing to search for in {arg!r}')
         subject = re.compile(r'[-_ ]?'.join(map(re.escape, words)), re.IGNORECASE)
-        scope = candidates
+        # the index also names deleted files and submodule folders, which hold nothing to read
+        scope = [p for p in candidates if is_file(p)]
 
     found = 0
     for p in scope:
