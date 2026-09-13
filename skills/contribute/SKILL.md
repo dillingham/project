@@ -1,6 +1,6 @@
 ---
 name: contribute
-description: "Use when the user asks to change the project plugin itself - how the board works, what a /project:* skill says, or what project.sh, worktree.sh, docs.sh or ci.sh does - and when a /project:* skill got something wrong and the fix belongs in the plugin rather than in this repo. Covers where the source lives (never the installed cache), whether a change belongs in the plugin or in the repo you are standing in, the mechanics that break a plugin skill silently, how to test a change live before it ships, the version bump, and the hand-off: committed in a checkout, never pushed, tagged or opened as a PR until the user says so."
+description: "Use when the user asks to change the project plugin itself - how the board works, what a /project:* skill says, or what project.sh, worktree.sh, docs.sh, backfill.sh or ci.sh does - and when a /project:* skill got something wrong and the fix belongs in the plugin rather than in this repo. Covers where the source lives (never the installed cache), whether a change belongs in the plugin or in the repo you are standing in, the mechanics that break a plugin skill silently, how to test a change live before it ships, the version bump, and the hand-off: committed in a checkout, never pushed, tagged or opened as a PR until the user says so."
 argument-hint: "<the change>"
 ---
 
@@ -45,6 +45,7 @@ Run everything the repository already checks:
 bash skills/cli/project.test.sh
 bash skills/docs/docs.test.sh
 bash skills/pr/pr.test.sh
+bash skills/backfill/backfill.test.sh
 claude plugin validate .
 ```
 

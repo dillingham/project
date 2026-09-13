@@ -150,3 +150,15 @@ That changes which direction the id-to-branch match is allowed to run. Deriving 
 That does cost a transition: a worktree opened before this change carries an old branch like `todo-x`, and the new exact-match check does not recognize it as claiming `x`. It is a one-time, self-resolving gap - every worktree still open at the moment this shipped, until it finishes or is recreated - not a standing ambiguity, which is the trade worth making over the alternative above.
 
 The same staleness argument applied to the commit subject, which used to lead with the ticket's stable name (`slugify: ...`). The subject is now a plain, capitalized sentence describing the change - `Map ß, ø and æ explicitly` - and the ticket's name moved to a trailing `Branch: slugify` line, the same shape as `Co-Authored-By:`. A trailer outlives the branch's own deletion the same way the commit itself does, so `git log --grep` or `git log --format='%(trailers:key=Branch,valueonly)'` still finds the ticket's whole history, and it names exactly what a GitHub search for the closed PR needs: `gh pr list --search "head:slugify" --state all` finds a merged or closed PR by its former head branch even after that branch is gone, because GitHub keeps the branch name on the PR record itself, not on the live ref.
+
+## Backfill collects with a script and files with judgement
+
+`/project:backfill` brings work from notes, GitHub issues or code onto the board. `backfill.sh` lists the candidates and which board files already cite each source; what each becomes is the agent's call. It is the grooming split again: whether something exists and whether it is already cited are verifiable, and worth precomputing; its status and home are not.
+
+The import that prompted it swarmed over a hundred notes with subagents, and that shape is kept. What changes is who writes: subagents return proposals and one agent writes them. Two agents writing at once file one piece of work under two names, each unable to see the other's file, and the single merge is where each proposal meets `find` against the board.
+
+Everything files at `groom`. A priority invented during an import is the 44 stamped defaults again, and that first import also promised an order `next` did not give.
+
+Rejected: a `Source:` header. The citation goes in the body, in backticks, where `find` and the collector's board column already reach it; a header is a field every reader and `check` would have to learn, for a fact that matters mainly on the next import.
+
+Rejected: a ledger giving every source item a disposition, verified by the script before the import may finish. It turned an import into bookkeeping heavier than the filing. Each subagent instead accounts for its rows under `from:` or `dropped:`, and the report counts what was filed, merged, dropped and left open.

@@ -13,6 +13,7 @@ Speak naturally: "what's next?", "let's start on slugify", "remember this for la
 | [/project:docs](skills/docs/SKILL.md) | Writes or reviews user documentation against the code and checks its house style. |
 | [/project:qa](skills/qa/SKILL.md) | Hunts bugs in a real browser and pins confirmed failures with reproducing tests. |
 | [/project:pr](skills/pr/SKILL.md) | Uses the current context to prepare or revise a PR, link related work, and validate the description. |
+| [/project:backfill](skills/backfill/SKILL.md) | Brings work from notes, GitHub issues or a part of the code onto the board as specs, tickets and lists, ready to triage. |
 | [/project:cli](skills/cli/SKILL.md) | Runs board commands directly and returns their raw output. With no arguments, shows the menu. |
 | [/project:contribute](skills/contribute/SKILL.md) | Changes this plugin in a source checkout, tests the changes, and prepares them for review. |
 
