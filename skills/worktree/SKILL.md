@@ -46,6 +46,8 @@ The worktrees folder sits outside the repo, and Claude Code keeps a session to t
 | `artisan` | `APP_URL` pointed at the worktree's own domain, `key:generate`, the sqlite file touched when `DB_CONNECTION=sqlite`, `migrate --seed --force` |
 | `package.json` | install with whichever manager its lockfile names, then `run build` when it has a build script |
 
+In a cloud sandbox behind an egress proxy, run [sandbox](../sandbox/SKILL.md) once first: without it the PHP is usually too old and `composer install` cannot download from GitHub.
+
 `--force`/`--no-interaction` run through the whole chain on purpose - nothing in it should ever be able to stall on a prompt, in an agent shell or a real terminal.
 
 Before any of that runs, the script also unsets every key `.env.example` declares. Herd (and other tooling) sources the original checkout's `.env` into ad-hoc shells, which means `composer`/`artisan`/`npm` here can inherit its `APP_KEY`, `APP_URL`, `DB_*` etc. as real environment variables - and an env var always wins over the new worktree's own `.env` file (PHP dotenv never overwrites an already-set var). Left alone, `key:generate` fails outright with "APP_KEY is already present in the environment", or the build inherits the wrong `APP_URL`, depending on whether that particular shell happened to have the original `.env` exported.
