@@ -46,9 +46,10 @@ cat > "$R/composer.lock" <<'JSON'
   ]
 }
 JSON
-run dist-only || fail 'dist-only exited non-zero'
-[ "$(cat "$TEMP/output")" = 'phpstan/phpstan https://api.github.com/repos/phpstan/phpstan/zipball/e285254e60f33c21902efef4a926ca0987c06804 phpstan/phpstan e285254e60f33c21902efef4a926ca0987c06804' ] || fail 'dist-only did not list exactly the GitHub-only package'
-ok 'only a package with no source and a GitHub zipball is built from git'
+run dists || fail 'dists exited non-zero'
+printf '%s\n' 'laravel/framework https://api.github.com/repos/laravel/framework/zipball/aaa111 laravel/framework aaa111' 'phpstan/phpstan https://api.github.com/repos/phpstan/phpstan/zipball/e285254e60f33c21902efef4a926ca0987c06804 phpstan/phpstan e285254e60f33c21902efef4a926ca0987c06804' > "$TEMP/expected"
+diff "$TEMP/expected" "$TEMP/output" > /dev/null || fail 'dists did not list exactly the GitHub zipballs, with or without a source'
+ok 'every GitHub zipball is built from git, and a dist from elsewhere is left to Composer'
 
 repo
 mkdir -p "$TEMP/home $passed"

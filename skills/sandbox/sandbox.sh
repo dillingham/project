@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Prepares a cloud sandbox - a container whose egress goes through an
 # allowlisting proxy - so a repository's own setup runs there unchanged:
-# the PHP its CI uses, Composer installing over git, Node fetching through
-# the proxy. Then sets up the checkout it is called from.
+# the PHP its CI uses, Composer's GitHub downloads built from git, Node
+# fetching through the proxy. Then sets up the checkout it is called from.
 #
 #   sandbox.sh              prepare the machine, then set up this checkout
 #   sandbox.sh machine      prepare the machine only
 #   sandbox.sh php-version  the PHP version this checkout wants
-#   sandbox.sh dist-only    locked packages Composer can only fetch as a GitHub zip
+#   sandbox.sh dists        locked packages whose dist is a GitHub zip
 #   sandbox.sh profile      write the shell profile block only
 set -euo pipefail
 
 cmd="${1:-all}"
-case "$cmd" in all|machine|php-version|dist-only|profile) ;; *) echo "usage: sandbox.sh [machine|php-version|dist-only|profile]" >&2; exit 2 ;; esac
+case "$cmd" in all|machine|php-version|dists|profile) ;; *) echo "usage: sandbox.sh [machine|php-version|dists|profile]" >&2; exit 2 ;; esac
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "not inside a git repository - run this from the checkout to set up" >&2; exit 1; }
 work="${TMPDIR:-/tmp}/project-sandbox"
@@ -40,16 +40,14 @@ php_version() {
   echo "${version:-8.4}"
 }
 
-# A package with no source in the lock, only a GitHub zipball (phpstan/phpstan
-# is the usual one), cannot install over git: name, dist url, owner/repo, ref.
-dist_only() {
+# Every locked package whose dist is a GitHub zipball, the download the proxy
+# refuses: name, dist url, owner/repo, ref.
+github_dists() {
   [ -f "$root/composer.lock" ] || return 0
   python3 -I - "$root/composer.lock" <<'PY'
 import json, re, sys
 lock = json.load(open(sys.argv[1]))
 for package in lock.get('packages', []) + lock.get('packages-dev', []):
-    if package.get('source'):
-        continue
     dist = package.get('dist') or {}
     match = re.match(r'https://api\.github\.com/repos/([^/]+/[^/]+)/zipball/(\w+)$', dist.get('url', ''))
     if match:
@@ -113,29 +111,42 @@ install_php() {
 }
 
 # GitHub's zip downloads are refused for repos not attached to the session,
-# while anonymous git reads are served, so Composer installs from source. A
-# dist-only package gets its zip built from git and placed where Composer
-# looks before downloading: its cache, keyed by sha1 of the dist url.
-composer_over_git() {
-  composer config --global preferred-install source
-  local cache name url repo ref key dest src
+# while anonymous git reads are served. Installing from source would get past
+# that but is not the same install: a source checkout carries every file the
+# package marks export-ignore, and laravel/pint's own App\ classes are enough
+# to break an arch test. So each GitHub dist is built the way GitHub builds
+# it, with git archive, and placed where Composer looks before downloading:
+# its cache, keyed by sha1 of the dist url.
+build_dist() {
+  local name="$1" url="$2" repo="$3" ref="$4" cache="$5" key dest src
+  key=$(printf %s "$url" | sha1sum | cut -d' ' -f1)
+  dest="$cache/$name/$key.zip"
+  [ ! -f "$dest" ] || return 0
+  src="$work/src-${name//\//-}"
+  rm -rf "$src" && mkdir -p "$src" "$(dirname "$dest")"
+  git -C "$src" init -q
+  if git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$ref" 2>/dev/null; then
+    git -C "$src" archive --format=zip --prefix="${repo//\//-}-${ref:0:7}/" -o "$dest.part" FETCH_HEAD && mv "$dest.part" "$dest"
+  else
+    echo "could not fetch $name at ${ref:0:7} - composer install will report it" >&2
+  fi
+  rm -rf "$src"
+}
+
+composer_from_git() {
+  local cache name url repo ref running=0
   cache=$(composer config --global cache-files-dir)
   while read -r name url repo ref; do
-    key=$(printf %s "$url" | sha1sum | cut -d' ' -f1)
-    dest="$cache/$name/$key.zip"
-    [ ! -f "$dest" ] || continue
-    say "building $name from git at ${ref:0:7}"
-    src="$work/src-${name//\//-}"
-    rm -rf "$src" && mkdir -p "$src" "$(dirname "$dest")"
-    git -C "$src" init -q
-    step "fetching $name" git -C "$src" fetch -q --depth 1 "https://github.com/$repo" "$ref"
-    git -C "$src" archive --format=zip --prefix="${repo//\//-}-${ref:0:7}/" -o "$dest" FETCH_HEAD
-  done < <(dist_only)
+    build_dist "$name" "$url" "$repo" "$ref" "$cache" &
+    running=$((running + 1))
+    if [ "$running" -ge 6 ]; then wait -n || true; running=$((running - 1)); fi
+  done < <(github_dists)
+  wait || true
 }
 
 case "$cmd" in
   php-version) php_version; exit 0 ;;
-  dist-only) dist_only; exit 0 ;;
+  dists) github_dists; exit 0 ;;
   profile) profile; exit 0 ;;
 esac
 
@@ -161,8 +172,8 @@ if [ -f "$root/composer.json" ]; then
   else
     install_php "$(php_version)"
   fi
-  say "Composer: install from source, seed dist-only packages"
-  composer_over_git
+  say "Composer: building GitHub dists from git"
+  composer_from_git
 fi
 
 [ "$cmd" = all ] || { echo "machine ready"; exit 0; }

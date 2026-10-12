@@ -10,7 +10,7 @@ Speak naturally: "what's next?", "let's start on slugify", "remember this for la
 | --- | --- |
 | [/project:chat](skills/chat/SKILL.md) | Plans work, captures ideas and issues, tracks priorities and dependencies, investigates decisions, and resumes tickets. |
 | [/project:worktree](skills/worktree/SKILL.md) | Creates a ticket branch in its own worktree and sets up dependencies and the app environment. |
-| [/project:sandbox](skills/sandbox/SKILL.md) | Prepares a cloud sandbox behind an egress proxy - the PHP CI pins, Composer over git, Node through the proxy - then sets up the checkout. |
+| [/project:sandbox](skills/sandbox/SKILL.md) | Prepares a cloud sandbox behind an egress proxy - the PHP CI pins, Composer past the proxy, Node through the proxy - then sets up the checkout. |
 | [/project:docs](skills/docs/SKILL.md) | Writes or reviews user documentation against the code and checks its house style. |
 | [/project:qa](skills/qa/SKILL.md) | Hunts bugs in a real browser and pins confirmed failures with reproducing tests. |
 | [/project:pr](skills/pr/SKILL.md) | Uses the current context to prepare or revise a PR, link related work, and validate the description. |
